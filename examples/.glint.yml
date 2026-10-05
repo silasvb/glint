@@ -1,0 +1,24 @@
+# Tell glint what lives outside .gitlab-ci.yml.
+default_branch: main
+project_path: my-group/my-app
+protected_branches: [main]
+protected_tags: ["v*"]
+
+# CI/CD variables set in Settings > CI/CD > Variables (project, group or instance).
+# Values are optional - presence, protection and environment scope are what matter.
+variables:
+  NPM_REGISTRY: https://npm.example.com
+  KUBE_SERVER: {environment_scope: "*"}
+  KUBE_TOKEN: {protected: true, masked: true}
+  AWS_REGION: {environment_scope: production}
+  RELEASE_TOKEN: {protected: true, masked: true}
+  SLACK_WEBHOOK: {masked: true}
+
+# Or point at an export: glab variable export > gitlab-vars.json
+# gitlab_variables_json: [gitlab-vars.json]
+
+# Map `include: project:` to local checkouts
+# project_includes:
+#   my-group/ci-templates: ../ci-templates
+
+ignore: []

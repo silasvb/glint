@@ -1,0 +1,33 @@
+# glint guard pattern: fail fast, with a clear message, when a variable a job
+# depends on is unset OR blank.
+#
+# Usage - include this file, then in a job:
+#
+#   deploy:
+#     variables:
+#       REQUIRED_VARS: "DEPLOY_TOKEN AWS_REGION"   # space/comma separated
+#     before_script:
+#       - !reference [.require-vars, script]
+#       - ...your own before_script...
+#
+# glint recognises this: every name in REQUIRED_VARS counts as guarded from the
+# point where the snippet runs. For one-off checks, the inline form works too
+# (note the `- |` block - a bare `- : "..."` line is parsed by YAML as a mapping):
+#
+#   script:
+#     - |
+#       : "${DEPLOY_TOKEN:?DEPLOY_TOKEN must be set in CI/CD settings}"
+
+.require-vars:
+  script:
+    - |
+      _glint_missing=""
+      for _glint_v in $(echo "${REQUIRED_VARS:-}" | tr ',' ' '); do
+        eval "_glint_val=\${${_glint_v}:-}"
+        [ -n "$_glint_val" ] || _glint_missing="$_glint_missing $_glint_v"
+      done
+      if [ -n "$_glint_missing" ]; then
+        echo "ERROR: required variables are unset or blank:$_glint_missing" >&2
+        echo "       Set them in Settings > CI/CD > Variables (check protected/environment scope)." >&2
+        exit 1
+      fi
