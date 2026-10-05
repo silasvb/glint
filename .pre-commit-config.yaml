@@ -13,3 +13,11 @@ repos:
     hooks:
       # Scans staged changes only; config is read from .gitleaks.toml.
       - id: gitleaks
+      # Scans the full git history. Not run on commit; run it by hand with
+      #   uv run pre-commit run gitleaks-history --hook-stage manual
+      - id: gitleaks
+        alias: gitleaks-history
+        name: Detect hardcoded secrets in git history
+        entry: gitleaks git --redact --verbose
+        stages: [manual]
+        always_run: true

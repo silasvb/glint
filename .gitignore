@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 glint-report.html
+
+# GitLab CI/CD variable exports (glab variable export) contain secrets
+vars.json
+*vars*.json

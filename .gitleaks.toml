@@ -1,6 +1,7 @@
-# gitleaks configuration, used by the pre-commit hook and by
-#   gitleaks git        (scan full history)
-#   gitleaks dir .      (scan the working tree)
+# gitleaks configuration, used by both pre-commit hooks:
+#   gitleaks          staged changes, on every commit
+#   gitleaks-history  full git history, run by hand:
+#                     uv run pre-commit run gitleaks-history --hook-stage manual
 #
 # Extends the built-in ruleset rather than replacing it, so new upstream
 # rules are picked up whenever the hook's rev is bumped.
@@ -10,14 +11,13 @@ useDefault = true
 
 # GitLab variable exports (`glab variable export > vars.json`) contain
 # real CI/CD secrets in a shape no generic rule catches: a JSON array of
-# {"key": ..., "value": ...} objects. Flag non-trivial "value" strings in
-# any JSON file so a committed export is blocked before it reaches the
-# remote. The repo has no JSON fixtures; if one is ever needed, add its
-# finding's fingerprint to .gitleaksignore.
+# {"key": ..., "value": ...} objects. Match that shape (a "key" followed
+# by a "value" in the same object) in JSON files, whatever the value's
+# length, and read the value with JSON escapes so `\"` can't cut it short.
 [[rules]]
 id = "gitlab-variable-export"
 description = "GitLab CI/CD variable export (glab variable export)"
 path = '''(?i)\.json$'''
-regex = '''"value"\s*:\s*"([^"]{8,})"'''
+regex = '''"key"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*?"value"\s*:\s*"((?:[^"\\]|\\.)+)"'''
 secretGroup = 1
 keywords = ['"value"']
