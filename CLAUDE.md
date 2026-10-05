@@ -64,3 +64,11 @@ cd examples && uv run --project .. glint check --all-scenarios
 ## Safety
 
 - Files exported from GitLab (`glab variable export > vars.json`) contain secrets. Never commit them, print their values, or include them in test fixtures — use fabricated names/flags only.
+
+## Pull requests
+
+Every time you create a PR (or push new commits to one), get it reviewed by the `code-reviewer` subagent (`.claude/agents/code-reviewer.md`):
+
+1. After `gh pr create` succeeds, launch the `code-reviewer` agent with the PR number. Give it only the PR number. Don't pass it your reasoning or a summary of the change; the review should be independent of the conversation that wrote the code.
+2. Relay its verdict and findings to the user exactly as it reports them, without softening or dropping any.
+3. Don't fix the findings or post them on the PR unless the user asks.
