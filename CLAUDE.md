@@ -11,7 +11,8 @@ uv sync                          # create/refresh .venv from uv.lock (includes t
 uv run pytest                    # run the test suite
 uv run pytest -k <name> -x       # run a subset, stop on first failure
 uv run pre-commit install        # once per clone: run the hooks on every commit
-uv run pre-commit run --all-files  # ruff lint (with fixes) + ruff format
+uv run pre-commit run --all-files  # ruff lint (with fixes) + ruff format; gitleaks only sees staged changes
+uv run pre-commit run gitleaks-history --hook-stage manual  # scan full git history for secrets
 uv run glint show                # run the CLI from the working tree (no install needed)
 uv run glint check --all-scenarios
 uv build                         # build sdist + wheel into dist/
@@ -67,6 +68,7 @@ cd examples && uv run --project .. glint check --all-scenarios
 ## Safety
 
 - Files exported from GitLab (`glab variable export > vars.json`) contain secrets. Never commit them, print their values, or include them in test fixtures — use fabricated names/flags only.
+- The gitleaks pre-commit hook (`.gitleaks.toml`) scans staged changes for secrets, including a custom rule for GitLab variable exports. If it flags something, remove the secret; never bypass it with `--no-verify`. Allowlist a genuine false positive by adding its fingerprint to `.gitleaksignore`.
 
 ## Pull requests
 
