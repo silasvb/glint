@@ -1,0 +1,47 @@
+include:
+  - local: /templates/require-vars.yml
+
+.deploy:
+  stage: deploy
+  extends: .notify
+  image: alpine/k8s:1.30.0
+  needs: [build, docker]
+  variables:
+    REQUIRED_VARS: "KUBE_TOKEN KUBE_SERVER"
+  before_script:
+    - !reference [.require-vars, script]
+  script:
+    - source ./scripts/env.sh
+    - kubectl --server="$KUBE_SERVER" --token="$KUBE_TOKEN" set image deploy/app app="$IMAGE"
+    - DEPLOY_URL="https://$APP_HOST"
+    - echo "deployed $BUILD_VERSION to $DEPLOY_URL"
+
+deploy-staging:
+  extends: .deploy
+  environment:
+    name: staging
+    url: https://staging.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+deploy-production:
+  extends: .deploy
+  environment:
+    name: production
+  needs: [build, docker, unit-tests, lint]
+  script:
+    - |
+      : "${AWS_REGION:?AWS_REGION must be set}"
+    - kubectl --server="$KUBE_SERVER" --token="$KUBE_TOKEN" set image deploy/app app="$IMAGE"
+    - aws s3 sync dist/ "s3://$ASSETS_BUCKET" --region "$AWS_REGION"
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $DEPLOY_PRODUCTON == "true"
+      when: manual
+
+cleanup:
+  stage: .post
+  script:
+    - echo "Cleaning up $DEPLOY_ENV"
+  rules:
+    - when: always

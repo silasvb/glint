@@ -1,0 +1,76 @@
+include:
+  - local: /ci/defaults.yml
+  - local: /ci/deploy.yml
+  - project: my-group/ci-templates
+    file: /security.yml
+
+stages: [build, test, deploy]
+
+variables:
+  IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  NODE_VERSION: "20"
+  SLACK_CHANNEL: ""
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        DEPLOY_ENV: production
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+build:
+  stage: build
+  extends: .node
+  script:
+    - npm ci
+    - npm run build
+    - echo "BUILD_VERSION=$(cat VERSION)" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+
+unit-tests:
+  stage: test
+  extends: .node
+  script:
+    - npm test -- --reporter=$TEST_REPORTER
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+lint:
+  stage: test
+  extends: .node
+  script:
+    - npm run lint
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: ["src/**/*.ts", "package.json"]
+
+docker:
+  stage: build
+  image: docker:27
+  services: [docker:27-dind]
+  script:
+    - docker build -t "$IMAGE" .
+    - docker push "$IMAGE"
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        docker tag "$IMAGE" "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+        docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+release-notes:
+  stage: deploy
+  script:
+    - echo "Releasing $CI_COMMIT_TAG"
+    - ./scripts/release.sh "$CI_COMMIT_TAG" "$RELEASE_TOKEN"
+  rules:
+    - if: $CI_COMMIT_REF_NAME =~ /^v\d+/ || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
