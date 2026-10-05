@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -26,7 +25,9 @@ def _ext_from_mapping(name: str, spec, origin: str) -> ExternalVar:
     return ExternalVar(name, None if spec is None else str(spec), origin=origin)
 
 
-def load_gitlab_variables_json(path: Path, scope_label: Optional[str] = None) -> list[ExternalVar]:
+def load_gitlab_variables_json(
+    path: Path, scope_label: str | None = None
+) -> list[ExternalVar]:
     """Read the JSON array returned by GET /projects/:id/variables (or `glab variable export`)."""
     data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, dict):
@@ -48,7 +49,7 @@ def load_gitlab_variables_json(path: Path, scope_label: Optional[str] = None) ->
     return out
 
 
-def load_settings(repo_root: Path, config_path: Optional[Path] = None) -> Settings:
+def load_settings(repo_root: Path, config_path: Path | None = None) -> Settings:
     s = Settings(repo_root=repo_root)
     path = config_path or repo_root / ".glint.yml"
     if not path.is_file():
@@ -63,7 +64,9 @@ def load_settings(repo_root: Path, config_path: Optional[Path] = None) -> Settin
     s.required_vars_name = str(data.get("required_vars_name", s.required_vars_name))
     s.strict = bool(data.get("strict", False))
     for name, spec in (data.get("variables") or {}).items():
-        for item in spec if isinstance(spec, list) else [spec]:  # a list = one entry per environment scope
+        for item in (
+            spec if isinstance(spec, list) else [spec]
+        ):  # a list = one entry per environment scope
             s.add_external(_ext_from_mapping(str(name), item, path.name))
     for f in data.get("gitlab_variables_json") or []:
         for ev in load_gitlab_variables_json((path.parent / f).resolve()):
@@ -86,16 +89,25 @@ def git_changed_files(repo_root: Path, since: str) -> list[str]:
 
 def standard_scenarios(s: Settings, base: Scenario) -> list[Scenario]:
     """The scenarios people usually care about, for side-by-side comparison."""
-    common = dict(
-        pipeline_vars=base.pipeline_vars,
-        changed_files=base.changed_files,
-        assume_changes=base.assume_changes,
-    )
+    common = {
+        "pipeline_vars": base.pipeline_vars,
+        "changed_files": base.changed_files,
+        "assume_changes": base.assume_changes,
+    }
     d = s.default_branch
     return [
         Scenario(f"{d} (push)", "branch", d, "push", **common),
-        Scenario("feature branch (push)", "branch", "feature/example", "push", **common),
-        Scenario(f"merge request → {d}", "mr", "feature/example", "merge_request_event", target_branch=d, **common),
+        Scenario(
+            "feature branch (push)", "branch", "feature/example", "push", **common
+        ),
+        Scenario(
+            f"merge request → {d}",
+            "mr",
+            "feature/example",
+            "merge_request_event",
+            target_branch=d,
+            **common,
+        ),
         Scenario("tag v1.0.0", "tag", "v1.0.0", "push", **common),
         Scenario(f"schedule on {d}", "branch", d, "schedule", **common),
     ]

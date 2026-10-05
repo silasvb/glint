@@ -24,8 +24,12 @@ def to_data(pr: PipelineResult) -> dict:
     for jr in pr.jobs:
         j = jr.job
         _, label, _ = status_of(jr)
-        job_findings = [f.to_dict() for f in pr.findings if f.job in (jr.name, j.base_name)] + [f.to_dict() for f in jr.findings]
-        needs = jr.outcome.needs if jr.outcome.needs is not None else j.config.get("needs")
+        job_findings = [
+            f.to_dict() for f in pr.findings if f.job in (jr.name, j.base_name)
+        ] + [f.to_dict() for f in jr.findings]
+        needs = (
+            jr.outcome.needs if jr.outcome.needs is not None else j.config.get("needs")
+        )
         jobs.append(
             {
                 "name": jr.name,
@@ -49,14 +53,23 @@ def to_data(pr: PipelineResult) -> dict:
                     k: [x if isinstance(x, str) else repr(x) for x in j.script(k)]
                     for k in ("before_script", "script", "after_script")
                 },
-                "uses": [_js_offsets(u.to_dict(), j.script(u.section)[u.entry]) for u in jr.uses],
+                "uses": [
+                    _js_offsets(u.to_dict(), j.script(u.section)[u.entry])
+                    for u in jr.uses
+                ],
                 "needs": [
-                    (n.get("job") or n.get("pipeline") or str(n)) if isinstance(n, dict) else str(n)
+                    (n.get("job") or n.get("pipeline") or str(n))
+                    if isinstance(n, dict)
+                    else str(n)
                     for n in (needs or [])
                 ]
                 if needs is not None
                 else None,
-                "extra": {k: j.config[k] for k in ("image", "environment", "trigger", "artifacts", "tags") if k in j.config},
+                "extra": {
+                    k: j.config[k]
+                    for k in ("image", "environment", "trigger", "artifacts", "tags")
+                    if k in j.config
+                },
                 "findings": job_findings,
             }
         )
@@ -90,11 +103,13 @@ def to_data(pr: PipelineResult) -> dict:
 def render(results: list[PipelineResult], filename: str) -> str:
     data = {
         "file": filename,
-        "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "generated": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
         "scenarios": [to_data(pr) for pr in results],
     }
     blob = json.dumps(data, default=str).replace("</", "<\\/")
-    return _TEMPLATE.replace("__DATA__", blob).replace("__TITLE__", f"glint · {filename}")
+    return _TEMPLATE.replace("__DATA__", blob).replace(
+        "__TITLE__", f"glint · {filename}"
+    )
 
 
 _TEMPLATE = r"""<!doctype html>

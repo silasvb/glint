@@ -11,21 +11,41 @@ import glob as globlib
 import itertools
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
 
 import yaml
 
 from .model import Finding
 
 RESERVED = {
-    "image", "services", "stages", "types", "before_script", "after_script", "variables",
-    "cache", "include", "workflow", "default", "spec",
+    "image",
+    "services",
+    "stages",
+    "types",
+    "before_script",
+    "after_script",
+    "variables",
+    "cache",
+    "include",
+    "workflow",
+    "default",
+    "spec",
 }
 DEFAULT_KEYS = [
-    "after_script", "artifacts", "before_script", "cache", "hooks", "id_tokens", "image",
-    "interruptible", "retry", "services", "tags", "timeout",
+    "after_script",
+    "artifacts",
+    "before_script",
+    "cache",
+    "hooks",
+    "id_tokens",
+    "image",
+    "interruptible",
+    "retry",
+    "services",
+    "tags",
+    "timeout",
 ]
 LEGACY_GLOBAL_KEYS = ["image", "services", "cache", "before_script", "after_script"]
 SCRIPT_KEYS = ("before_script", "script", "after_script")
@@ -44,7 +64,10 @@ class _Loader(yaml.SafeLoader):
     pass
 
 
-_Loader.add_constructor("!reference", lambda loader, node: Reference(loader.construct_sequence(node, deep=True)))
+_Loader.add_constructor(
+    "!reference",
+    lambda loader, node: Reference(loader.construct_sequence(node, deep=True)),
+)
 
 
 def deep_merge(a, b):
@@ -61,7 +84,7 @@ def deep_merge(a, b):
 class VarDef:
     value: str
     expand: bool = True
-    description: Optional[str] = None
+    description: str | None = None
 
 
 def normalise_variables(raw) -> dict[str, VarDef]:
@@ -71,7 +94,9 @@ def normalise_variables(raw) -> dict[str, VarDef]:
     for k, v in raw.items():
         if isinstance(v, dict):
             val = v.get("value", "")
-            out[str(k)] = VarDef(_scalar(val), v.get("expand", True) is not False, v.get("description"))
+            out[str(k)] = VarDef(
+                _scalar(val), v.get("expand", True) is not False, v.get("description")
+            )
         else:
             out[str(k)] = VarDef(_scalar(v))
     return out
@@ -92,8 +117,10 @@ class Job:
     stage: str
     origin: list[str] = field(default_factory=list)
     extends: list[str] = field(default_factory=list)
-    matrix: dict[str, str] = field(default_factory=dict)  # parallel:matrix values for this instance
-    base_name: Optional[str] = None  # job name before matrix expansion
+    matrix: dict[str, str] = field(
+        default_factory=dict
+    )  # parallel:matrix values for this instance
+    base_name: str | None = None  # job name before matrix expansion
 
     def script(self, key: str) -> list:
         return self.config.get(key) or []
@@ -127,14 +154,18 @@ class ConfigLoader:
         self.findings: list[Finding] = []
         self.files: list[str] = []
         self.origins: dict[str, list[str]] = {}
-        self._stack: list[Path] = []  # files currently being loaded, for cycle detection
+        self._stack: list[
+            Path
+        ] = []  # files currently being loaded, for cycle detection
         self._loaded: set[tuple[Path, str]] = set()  # (file, inputs) already merged
 
     # --- files & includes -------------------------------------------------
 
     def _rel(self, path: Path) -> str:
         try:
-            return str(path.resolve().relative_to(self.repo_root.resolve())).replace("\\", "/")
+            return str(path.resolve().relative_to(self.repo_root.resolve())).replace(
+                "\\", "/"
+            )
         except ValueError:
             return str(path)
 
@@ -143,7 +174,9 @@ class ConfigLoader:
         try:
             docs = [d for d in yaml.load_all(text, Loader=_Loader)]
         except yaml.YAMLError as e:
-            self.findings.append(Finding("error", "yaml-error", f"{self._rel(path)}: {e}"))
+            self.findings.append(
+                Finding("error", "yaml-error", f"{self._rel(path)}: {e}")
+            )
             return {}
         if len(docs) >= 2 and isinstance(docs[0], dict) and "spec" in docs[0]:
             spec = docs[0].get("spec") or {}
@@ -152,13 +185,17 @@ class ConfigLoader:
                 if isinstance(opts, dict) and "default" in opts:
                     values[name] = opts["default"]
             values.update(inputs or {})
-            body = re.split(r"^---[ \t]*$", text, maxsplit=1, flags=re.M)
+            body = re.split(r"^---[ \t]*$", text, maxsplit=1, flags=re.MULTILINE)
             body_text = body[1] if len(body) > 1 else text
             body_text = self._interpolate(body_text, values, path)
             try:
                 return yaml.load(body_text, Loader=_Loader) or {}
             except yaml.YAMLError as e:
-                self.findings.append(Finding("error", "yaml-error", f"{self._rel(path)} (after inputs): {e}"))
+                self.findings.append(
+                    Finding(
+                        "error", "yaml-error", f"{self._rel(path)} (after inputs): {e}"
+                    )
+                )
                 return {}
         doc = docs[-1] if docs else {}
         return doc if isinstance(doc, dict) else {}
@@ -168,7 +205,11 @@ class ConfigLoader:
             name, funcs = m.group(1), m.group(2) or ""
             if name not in values:
                 self.findings.append(
-                    Finding("error", "include-input", f"{self._rel(path)}: input '{name}' has no value or default")
+                    Finding(
+                        "error",
+                        "include-input",
+                        f"{self._rel(path)}: input '{name}' has no value or default",
+                    )
                 )
                 return m.group(0)
             val = values[name]
@@ -178,15 +219,25 @@ class ConfigLoader:
                 val = val[int(t.group(1)) : int(t.group(1)) + int(t.group(2))]
             return val
 
-        return re.sub(r"\$\[\[\s*inputs\.([A-Za-z0-9_-]+)\s*((?:\|[^\]]*)?)\]\]", sub, text)
+        return re.sub(
+            r"\$\[\[\s*inputs\.([A-Za-z0-9_-]+)\s*((?:\|[^\]]*)?)\]\]", sub, text
+        )
 
-    def load_file(self, path: Path, root: Path, inputs: dict | None = None, depth: int = 0) -> dict:
+    def load_file(
+        self, path: Path, root: Path, inputs: dict | None = None, depth: int = 0
+    ) -> dict:
         rel = self._rel(path)
         key = path.resolve()
         if key in self._stack:
-            chain = " → ".join(self._rel(p) for p in self._stack[self._stack.index(key) :] + [key])
+            chain = " → ".join(
+                self._rel(p) for p in self._stack[self._stack.index(key) :] + [key]
+            )
             self.findings.append(
-                Finding("warning", "include-cycle", f"circular include skipped (each file is loaded once): {chain}")
+                Finding(
+                    "warning",
+                    "include-cycle",
+                    f"circular include skipped (each file is loaded once): {chain}",
+                )
             )
             return {}
         loaded_key = (key, json.dumps(inputs or {}, sort_keys=True, default=str))
@@ -194,7 +245,11 @@ class ConfigLoader:
             return {}  # GitLab merges a file that's included more than once only once
         if len(self._loaded) >= MAX_INCLUDES:
             self.findings.append(
-                Finding("error", "include-limit", f"more than {MAX_INCLUDES} included files; {rel} not loaded")
+                Finding(
+                    "error",
+                    "include-limit",
+                    f"more than {MAX_INCLUDES} included files; {rel} not loaded",
+                )
             )
             return {}
         self._loaded.add(loaded_key)
@@ -204,7 +259,11 @@ class ConfigLoader:
         merged: dict = {}
         self._stack.append(key)
         try:
-            for spec in includes if isinstance(includes, list) else ([includes] if includes else []):
+            for spec in (
+                includes
+                if isinstance(includes, list)
+                else ([includes] if includes else [])
+            ):
                 for sub in self._resolve_include(spec, path, root, depth):
                     merged = deep_merge(merged, sub)
         finally:
@@ -216,17 +275,32 @@ class ConfigLoader:
                     self.origins[key].append(rel)
         return deep_merge(merged, cfg)
 
-    def _resolve_include(self, spec, current: Path, root: Path, depth: int) -> list[dict]:
+    def _resolve_include(
+        self, spec, current: Path, root: Path, depth: int
+    ) -> list[dict]:
         if isinstance(spec, str):
             spec = {"remote": spec} if re.match(r"https?://", spec) else {"local": spec}
         if not isinstance(spec, dict):
-            self.findings.append(Finding("error", "include-invalid", f"invalid include entry: {spec!r}"))
+            self.findings.append(
+                Finding("error", "include-invalid", f"invalid include entry: {spec!r}")
+            )
             return []
-        label = next((f"{k}: {spec[k]}" for k in ("local", "project", "remote", "template", "component") if k in spec), str(spec))
+        label = next(
+            (
+                f"{k}: {spec[k]}"
+                for k in ("local", "project", "remote", "template", "component")
+                if k in spec
+            ),
+            str(spec),
+        )
         if "rules" in spec and self.include_rule_check:
             ok, why = self.include_rule_check(spec["rules"])
             if not ok:
-                self.findings.append(Finding("info", "include-skipped", f"include {label} skipped: {why}"))
+                self.findings.append(
+                    Finding(
+                        "info", "include-skipped", f"include {label} skipped: {why}"
+                    )
+                )
                 return []
         inputs = spec.get("inputs") or spec.get("with")
         if "local" in spec:
@@ -247,28 +321,52 @@ class ConfigLoader:
             files = spec.get("file") or []
             out = []
             for f in files if isinstance(files, list) else [files]:
-                out += self._load_glob(proj_root, str(f), inputs, depth, f"project {proj}: {f}")
+                out += self._load_glob(
+                    proj_root, str(f), inputs, depth, f"project {proj}: {f}"
+                )
             return out
-        kind = next((k for k in ("remote", "template", "component") if k in spec), "unknown")
+        kind = next(
+            (k for k in ("remote", "template", "component") if k in spec), "unknown"
+        )
         self.findings.append(
-            Finding("warning", "include-unresolved", f"include {label} not loaded ({kind} includes aren't fetched); jobs it defines are missing")
+            Finding(
+                "warning",
+                "include-unresolved",
+                f"include {label} not loaded ({kind} includes aren't fetched); jobs it defines are missing",
+            )
         )
         return []
 
-    def _load_glob(self, root: Path, pattern: str, inputs, depth: int, label: str) -> list[dict]:
+    def _load_glob(
+        self, root: Path, pattern: str, inputs, depth: int, label: str
+    ) -> list[dict]:
         rel = pattern.lstrip("/")
         if any(c in rel for c in "*?["):
-            paths = sorted(Path(p) for p in globlib.glob(str(root / rel), recursive=True))
+            paths = sorted(
+                Path(p) for p in globlib.glob(str(root / rel), recursive=True)
+            )
         else:
             paths = [root / rel]
         out = []
         for p in paths:
             if not p.is_file():
-                self.findings.append(Finding("error", "include-missing", f"include {label}: file not found ({p})"))
+                self.findings.append(
+                    Finding(
+                        "error",
+                        "include-missing",
+                        f"include {label}: file not found ({p})",
+                    )
+                )
                 continue
             out.append(self.load_file(p, root, inputs, depth + 1))
         if not paths:
-            self.findings.append(Finding("warning", "include-missing", f"include {label}: glob matched no files"))
+            self.findings.append(
+                Finding(
+                    "warning",
+                    "include-missing",
+                    f"include {label}: glob matched no files",
+                )
+            )
         return out
 
     # --- extends / references / defaults ---------------------------------
@@ -289,13 +387,34 @@ class ConfigLoader:
             chain: list[str] = []
             for p in parents:
                 if p in stack:
-                    self.findings.append(Finding("error", "extends-cycle", f"circular extends: {' → '.join(stack + (p,))}", job=name))
+                    self.findings.append(
+                        Finding(
+                            "error",
+                            "extends-cycle",
+                            f"circular extends: {' → '.join(stack + (p,))}",
+                            job=name,
+                        )
+                    )
                     continue
                 if p not in cfg:
-                    self.findings.append(Finding("error", "extends-missing", f"'{name}' extends '{p}', which isn't defined", job=name))
+                    self.findings.append(
+                        Finding(
+                            "error",
+                            "extends-missing",
+                            f"'{name}' extends '{p}', which isn't defined",
+                            job=name,
+                        )
+                    )
                     continue
                 if len(stack) > 11:
-                    self.findings.append(Finding("error", "extends-depth", f"extends nesting deeper than 11 levels at '{name}'", job=name))
+                    self.findings.append(
+                        Finding(
+                            "error",
+                            "extends-depth",
+                            f"extends nesting deeper than 11 levels at '{name}'",
+                            job=name,
+                        )
+                    )
                     continue
                 base = deep_merge(base, resolve(p, stack + (p,)))
                 chain += chains.get(p, []) + [p]
@@ -306,7 +425,9 @@ class ConfigLoader:
 
         out = {}
         for k, v in cfg.items():
-            out[k] = resolve(k, (k,)) if (k not in RESERVED and isinstance(v, dict)) else v
+            out[k] = (
+                resolve(k, (k,)) if (k not in RESERVED and isinstance(v, dict)) else v
+            )
         return out, chains
 
     def _resolve_references(self, cfg: dict) -> dict:
@@ -314,14 +435,26 @@ class ConfigLoader:
             node = cfg
             for part in path:
                 if not isinstance(node, dict) or part not in node:
-                    self.findings.append(Finding("error", "reference-missing", f"!reference {list(path)} points at nothing"))
+                    self.findings.append(
+                        Finding(
+                            "error",
+                            "reference-missing",
+                            f"!reference {list(path)} points at nothing",
+                        )
+                    )
                     return None
                 node = node[part]
             return resolve(node, depth + 1)
 
         def resolve(node, depth: int = 0):
             if depth > 10:
-                self.findings.append(Finding("error", "reference-depth", "!reference nesting deeper than 10 levels"))
+                self.findings.append(
+                    Finding(
+                        "error",
+                        "reference-depth",
+                        "!reference nesting deeper than 10 levels",
+                    )
+                )
                 return None
             if isinstance(node, Reference):
                 return lookup(list(node), depth)
@@ -341,7 +474,9 @@ class ConfigLoader:
         cfg = self._resolve_references(extended)
 
         stages = cfg.get("stages") or cfg.get("types") or DEFAULT_STAGES
-        stages = [".pre"] + [s for s in stages if s not in (".pre", ".post")] + [".post"]
+        stages = (
+            [".pre"] + [s for s in stages if s not in (".pre", ".post")] + [".post"]
+        )
 
         default = dict(cfg.get("default") or {})
         for key in LEGACY_GLOBAL_KEYS:
@@ -360,9 +495,11 @@ class ConfigLoader:
             inherit = job.get("inherit") or {}
             inh_default = inherit.get("default", True)
             for key in DEFAULT_KEYS:
-                if key in default and key not in job:
-                    if inh_default is True or (isinstance(inh_default, list) and key in inh_default):
-                        job[key] = copy.deepcopy(default[key])
+                inherited = inh_default is True or (
+                    isinstance(inh_default, list) and key in inh_default
+                )
+                if key in default and key not in job and inherited:
+                    job[key] = copy.deepcopy(default[key])
             for key in SCRIPT_KEYS:
                 if key in job:
                     job[key] = _flatten(job[key])
@@ -372,7 +509,15 @@ class ConfigLoader:
             stage = str(job.get("stage", "test"))
             origin = self.origins.get(name, [])
             for inst_name, inst_cfg, matrix in _expand_matrix(name, job):
-                jobs[inst_name] = Job(inst_name, inst_cfg, stage, origin, chains.get(name, []), matrix, name)
+                jobs[inst_name] = Job(
+                    inst_name,
+                    inst_cfg,
+                    stage,
+                    origin,
+                    chains.get(name, []),
+                    matrix,
+                    name,
+                )
 
         wf = cfg.get("workflow") or {}
         if isinstance(wf.get("rules"), list):
@@ -411,7 +556,10 @@ def _expand_matrix(name: str, job: dict):
         if not isinstance(entry, dict):
             continue
         keys = list(entry)
-        values = [[_scalar(x) for x in (v if isinstance(v, list) else [v])] for v in entry.values()]
+        values = [
+            [_scalar(x) for x in (v if isinstance(v, list) else [v])]
+            for v in entry.values()
+        ]
         for combo in itertools.product(*values):
             vals = dict(zip(keys, combo))
             yield f"{name}: [{', '.join(combo)}]", job, vals

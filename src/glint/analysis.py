@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from .model import Finding
 from .pipeline import YAML_SOURCES, JobResult, PipelineResult
@@ -14,14 +13,57 @@ from .shell import DEFAULTING, GUARDING, gitlab_refs, scan
 
 # Set by the shell / OS / runner image, not by GitLab.
 SHELL_VARS = {
-    "HOME", "PATH", "PWD", "OLDPWD", "USER", "LOGNAME", "SHELL", "HOSTNAME", "HOSTTYPE", "OSTYPE",
-    "MACHTYPE", "UID", "EUID", "GID", "PPID", "RANDOM", "SECONDS", "LINENO", "IFS", "PS1", "PS2", "PS4",
-    "TERM", "LANG", "LC_ALL", "TMPDIR", "BASH", "BASH_SOURCE", "BASH_VERSION", "BASH_REMATCH", "BASHPID",
-    "FUNCNAME", "PIPESTATUS", "REPLY", "OPTARG", "OPTIND", "SHLVL", "EPOCHSECONDS", "EPOCHREALTIME",
+    "HOME",
+    "PATH",
+    "PWD",
+    "OLDPWD",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "HOSTNAME",
+    "HOSTTYPE",
+    "OSTYPE",
+    "MACHTYPE",
+    "UID",
+    "EUID",
+    "GID",
+    "PPID",
+    "RANDOM",
+    "SECONDS",
+    "LINENO",
+    "IFS",
+    "PS1",
+    "PS2",
+    "PS4",
+    "TERM",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "BASH",
+    "BASH_SOURCE",
+    "BASH_VERSION",
+    "BASH_REMATCH",
+    "BASHPID",
+    "FUNCNAME",
+    "PIPESTATUS",
+    "REPLY",
+    "OPTARG",
+    "OPTIND",
+    "SHLVL",
+    "EPOCHSECONDS",
+    "EPOCHREALTIME",
 }
 
 # Sources that come from outside the YAML, so the YAML can't vouch for them.
-EXTERNAL_SOURCES = {"cicd", "dotenv", "maybe-dotenv", "maybe-sourced", "undefined", "unavailable", "pipeline"}
+EXTERNAL_SOURCES = {
+    "cicd",
+    "dotenv",
+    "maybe-dotenv",
+    "maybe-sourced",
+    "undefined",
+    "unavailable",
+    "pipeline",
+}
 
 SOURCE_TEXT = {
     "script": "set earlier in the script",
@@ -47,7 +89,7 @@ class VarUse:
     end: int
     line: int
     source: str
-    protection: Optional[str]  # defaulted | guard | guarded | tested | None
+    protection: str | None  # defaulted | guard | guarded | tested | None
     severity: str  # ok | info | warning | error
     message: str
 
@@ -63,7 +105,7 @@ class _ShellState:
     def __init__(self):
         self.defined: dict[str, str] = {}
         self.guarded: dict[str, str] = {}
-        self.opaque: Optional[str] = None  # first `source`/`eval` we couldn't see through
+        self.opaque: str | None = None  # first `source`/`eval` we couldn't see through
 
 
 def analyse_job(jr: JobResult, pr: PipelineResult) -> None:
@@ -91,21 +133,44 @@ def analyse_job(jr: JobResult, pr: PipelineResult) -> None:
         if name in jr.unavailable:
             return "unavailable", jr.unavailable[name]
         if jr.dotenv_unknown:
-            return "maybe-dotenv", f"upstream {', '.join(jr.dotenv_unknown)} writes a dotenv report glint can't read"
+            return (
+                "maybe-dotenv",
+                f"upstream {', '.join(jr.dotenv_unknown)} writes a dotenv report glint can't read",
+            )
         if st.opaque:
             return "maybe-sourced", f"after {st.opaque}"
         return "undefined", ""
 
-    def classify(name, section, idx, text, u, st: _ShellState, main_defs: dict[str, str], tested_here: set[str]):
+    def classify(
+        name,
+        section,
+        idx,
+        text,
+        u,
+        st: _ShellState,
+        main_defs: dict[str, str],
+        tested_here: set[str],
+    ):
         loc = f"{section}[{idx}] line {_line_of(text, u.start)}"
         if name in SHELL_VARS or name in s.ignore:
-            uses.append(VarUse(name, section, idx, u.start, u.end, _line_of(text, u.start), "shell", None, "ok", SOURCE_TEXT["shell"]))
+            uses.append(
+                VarUse(
+                    name,
+                    section,
+                    idx,
+                    u.start,
+                    u.end,
+                    _line_of(text, u.start),
+                    "shell",
+                    None,
+                    "ok",
+                    SOURCE_TEXT["shell"],
+                )
+            )
             return
         if u.modifier in DEFAULTING:
             protection = "defaulted"
-        elif u.modifier in GUARDING:
-            protection = "guard"
-        elif u.guard_test:
+        elif u.modifier in GUARDING or u.guard_test:
             protection = "guard"
         elif u.tested or name in tested_here:
             # `if [ -n "$X" ]; then ... $X ... fi` - later uses in the same block are checked too
@@ -120,51 +185,99 @@ def analyse_job(jr: JobResult, pr: PipelineResult) -> None:
         safe = protection in ("defaulted", "tested")
         guarded = protection in ("guard", "guarded")
 
-        if section == "after_script" and source in ("undefined", "maybe-sourced") and name in main_defs:
-            sev, msg = "error", (
-                f"${name} is set in {main_defs[name]}, but after_script runs in a separate shell - "
-                "it is not available here. Write it to a file in script and read it back, or set it in variables:."
+        if (
+            section == "after_script"
+            and source in ("undefined", "maybe-sourced")
+            and name in main_defs
+        ):
+            sev, msg = (
+                "error",
+                (
+                    f"${name} is set in {main_defs[name]}, but after_script runs in a separate shell - "
+                    "it is not available here. Write it to a file in script and read it back, or set it in variables:."
+                ),
             )
             add("error", "after-script-scope", msg, name, loc)
-        elif source == "yaml" and (jr.variables[name].expanded or "") == "" and not safe:
+        elif (
+            source == "yaml" and (jr.variables[name].expanded or "") == "" and not safe
+        ):
             if guarded:
-                sev, msg = "warning", f"${name} is blank in the YAML; the guard will fail unless it's overridden in CI/CD settings"
+                sev, msg = (
+                    "warning",
+                    f"${name} is blank in the YAML; the guard will fail unless it's overridden in CI/CD settings",
+                )
                 add("warning", "blank-guarded", msg, name, loc)
             else:
-                sev, msg = "warning", f"${name} is defined but blank ({jr.variables[name].source} variables)"
+                sev, msg = (
+                    "warning",
+                    f"${name} is defined but blank ({jr.variables[name].source} variables)",
+                )
                 add("warning", "blank-var", msg, name, loc)
         elif source == "unavailable":
             if safe:
                 sev, msg = "info", f"${name}: {detail} (handled: {protection})"
             elif guarded:
-                sev, msg = "warning", f"${name}: {detail} - the guard will fail in this scenario"
+                sev, msg = (
+                    "warning",
+                    f"${name}: {detail} - the guard will fail in this scenario",
+                )
                 add("warning", "unavailable-guarded", msg, name, loc)
             else:
                 sev, msg = "error", f"${name} is not set here: {detail}"
                 add("error", "unavailable-var", msg, name, loc)
         elif source in ("maybe-dotenv", "maybe-sourced"):
             if not (safe or guarded):
-                sev, msg = "warning", f"${name} isn't defined in the YAML; {detail}. Guard it to be sure."
+                sev, msg = (
+                    "warning",
+                    f"${name} isn't defined in the YAML; {detail}. Guard it to be sure.",
+                )
                 add("warning", "possibly-undefined", msg, name, loc)
         elif source == "undefined":
             hint = "Declare it under variables: in .glint.yml if it's set in project/group CI/CD settings."
             if safe:
-                sev, msg = "info", f"${name} isn't defined anywhere glint can see (handled: {protection})"
+                sev, msg = (
+                    "info",
+                    f"${name} isn't defined anywhere glint can see (handled: {protection})",
+                )
             elif guarded:
-                sev, msg = "warning", f"${name} isn't defined anywhere glint can see - the guard will fail unless it's set in CI/CD settings. {hint}"
+                sev, msg = (
+                    "warning",
+                    f"${name} isn't defined anywhere glint can see - the guard will fail unless it's set in CI/CD settings. {hint}",
+                )
                 add("warning", "undefined-guarded", msg, name, loc)
             else:
                 sev, msg = "error", f"${name} is used but never defined. {hint}"
                 add("error", "undefined-var", msg, name, loc)
 
-        if s.strict and sev == "ok" and source in EXTERNAL_SOURCES and protection is None:
-            sev, msg = "error", (
-                f"${name} comes from {SOURCE_TEXT[source]}, but isn't checked before use. "
-                f"Add `: \"${{{name}:?{name} is required}}\"` or list it in ${s.required_vars_name}."
+        if (
+            s.strict
+            and sev == "ok"
+            and source in EXTERNAL_SOURCES
+            and protection is None
+        ):
+            sev, msg = (
+                "error",
+                (
+                    f"${name} comes from {SOURCE_TEXT[source]}, but isn't checked before use. "
+                    f'Add `: "${{{name}:?{name} is required}}"` or list it in ${s.required_vars_name}.'
+                ),
             )
             add("error", "unguarded", msg, name, loc)
 
-        uses.append(VarUse(name, section, idx, u.start, u.end, _line_of(text, u.start), source, protection, sev, msg))
+        uses.append(
+            VarUse(
+                name,
+                section,
+                idx,
+                u.start,
+                u.end,
+                _line_of(text, u.start),
+                source,
+                protection,
+                sev,
+                msg,
+            )
+        )
         if protection == "guard" and u.modifier in GUARDING or u.guard_test:
             st.guarded.setdefault(name, loc)
 
@@ -182,12 +295,25 @@ def analyse_job(jr: JobResult, pr: PipelineResult) -> None:
                 for pos, _, kind, obj in sorted(events, key=lambda e: (e[0], e[1])):
                     loc = f"{section}[{idx}] line {_line_of(text, pos)}"
                     if kind == "use":
-                        classify(obj.name, section, idx, text, obj, st, main_defs, tested_here)
+                        classify(
+                            obj.name,
+                            section,
+                            idx,
+                            text,
+                            obj,
+                            st,
+                            main_defs,
+                            tested_here,
+                        )
                         if obj.name == s.required_vars_name:
                             e = jr.variables.get(obj.name)
-                            for req in re.split(r"[\s,]+", (e.expanded or e.value or "") if e else ""):
+                            for req in re.split(
+                                r"[\s,]+", (e.expanded or e.value or "") if e else ""
+                            ):
                                 if req:
-                                    st.guarded.setdefault(req, f"{loc} (${s.required_vars_name})")
+                                    st.guarded.setdefault(
+                                        req, f"{loc} (${s.required_vars_name})"
+                                    )
                     elif kind == "def":
                         st.defined.setdefault(obj.name, loc)
                     elif kind == "source":
@@ -203,7 +329,9 @@ def analyse_job(jr: JobResult, pr: PipelineResult) -> None:
     main = _ShellState()
     run_shell(["before_script", "script"], main, {})
     after = _ShellState()
-    after.guarded = dict(main.guarded)  # a guard proves the CI/CD value exists; it still does in after_script
+    after.guarded = dict(
+        main.guarded
+    )  # a guard proves the CI/CD value exists; it still does in after_script
     run_shell(["after_script"], after, main.defined)
 
     # Variable values in the YAML that reference undefined variables.
@@ -214,15 +342,28 @@ def analyse_job(jr: JobResult, pr: PipelineResult) -> None:
             if ref in jr.variables or ref in s.ignore or ref in jr.dotenv:
                 continue
             if ref in jr.unavailable:
-                add("warning", "var-ref-unavailable", f"{name}: {e.value!r} references ${ref}, which is not set here: {jr.unavailable[ref]}", ref)
+                add(
+                    "warning",
+                    "var-ref-unavailable",
+                    f"{name}: {e.value!r} references ${ref}, which is not set here: {jr.unavailable[ref]}",
+                    ref,
+                )
             else:
-                add("warning", "var-ref-undefined", f"{name}: {e.value!r} references ${ref}, which is never defined", ref)
+                add(
+                    "warning",
+                    "var-ref-undefined",
+                    f"{name}: {e.value!r} references ${ref}, which is never defined",
+                    ref,
+                )
 
     jr.uses = uses
-    jr.findings = sorted(findings.values(), key=lambda f: ({"error": 0, "warning": 1, "info": 2}[f.severity], f.var or ""))
+    jr.findings = sorted(
+        findings.values(),
+        key=lambda f: ({"error": 0, "warning": 1, "info": 2}[f.severity], f.var or ""),
+    )
 
 
-def _sourced_defs(path: str, pr: PipelineResult, jr: JobResult) -> Optional[set[str]]:
+def _sourced_defs(path: str, pr: PipelineResult, jr: JobResult) -> set[str] | None:
     """Variables defined at top level of a sourced file, if it's in the repo."""
     path = path.replace("$CI_PROJECT_DIR/", "").replace("${CI_PROJECT_DIR}/", "")
     if "$" in path:

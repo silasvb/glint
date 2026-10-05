@@ -12,10 +12,10 @@ Supports ``$VAR``, string literals, ``/regex/flags``, ``null``, ``==``, ``!=``,
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
-Lookup = Callable[[str], Optional[str]]
+Lookup = Callable[[str], str | None]
 
 _TOKEN_RE = re.compile(
     r"""\s*(?:
@@ -25,7 +25,7 @@ _TOKEN_RE = re.compile(
     | (?P<null>null\b)
     | (?P<op>==|!=|=~|!~|&&|\|\||\(|\))
     )""",
-    re.X,
+    re.VERBOSE,
 )
 
 
@@ -91,7 +91,7 @@ class _Parser:
         self.vars: list[str] = []
         self.parts: list[str] = []
 
-    def peek(self) -> Optional[_Tok]:
+    def peek(self) -> _Tok | None:
         return self.toks[self.pos] if self.pos < len(self.toks) else None
 
     def take(self) -> _Tok:
@@ -191,11 +191,11 @@ def _truthy(v) -> bool:
     return v != ""
 
 
-def _as_regex(v) -> Optional[_Regex]:
+def _as_regex(v) -> _Regex | None:
     if isinstance(v, _Regex):
         return v
     if isinstance(v, str):
-        m = re.fullmatch(r"/(.*)/([a-z]*)", v, re.S)
+        m = re.fullmatch(r"/(.*)/([a-z]*)", v, re.DOTALL)
         if m:
             return _Regex(v)
         try:
