@@ -138,7 +138,7 @@ As an extra safety net, put `set -u` at the top of a script. The shell then abor
 
 ```sh
 uv sync && uv run pytest
-uv run pre-commit install          # once per clone: lint/format on every commit
+uv run pre-commit install          # once per clone: lint, format and secret-scan on every commit
 uv run pre-commit run --all-files  # run the hooks by hand
 uv run glint html examples/.gitlab-ci.yml -o examples/glint-report.html
 ```

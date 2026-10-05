@@ -1,0 +1,23 @@
+# gitleaks configuration, used by the pre-commit hook and by
+#   gitleaks git        (scan full history)
+#   gitleaks dir .      (scan the working tree)
+#
+# Extends the built-in ruleset rather than replacing it, so new upstream
+# rules are picked up whenever the hook's rev is bumped.
+
+[extend]
+useDefault = true
+
+# GitLab variable exports (`glab variable export > vars.json`) contain
+# real CI/CD secrets in a shape no generic rule catches: a JSON array of
+# {"key": ..., "value": ...} objects. Flag non-trivial "value" strings in
+# any JSON file so a committed export is blocked before it reaches the
+# remote. The repo has no JSON fixtures; if one is ever needed, add its
+# finding's fingerprint to .gitleaksignore.
+[[rules]]
+id = "gitlab-variable-export"
+description = "GitLab CI/CD variable export (glab variable export)"
+path = '''(?i)\.json$'''
+regex = '''"value"\s*:\s*"([^"]{8,})"'''
+secretGroup = 1
+keywords = ['"value"']
