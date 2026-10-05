@@ -227,9 +227,10 @@ def _sourced_defs(path: str, pr: PipelineResult, jr: JobResult) -> Optional[set[
     path = path.replace("$CI_PROJECT_DIR/", "").replace("${CI_PROJECT_DIR}/", "")
     if "$" in path:
         return None
-    p = (pr.settings.repo_root / path.lstrip("./")) if not path.startswith("/") else Path(path)
-    if not p.is_file():
-        return None
+    root = pr.settings.repo_root.resolve()
+    p = Path(path) if path.startswith("/") else (root / path).resolve()
+    if not p.is_relative_to(root) or not p.is_file():
+        return None  # outside the repo (e.g. a file baked into the image): can't see it
     try:
         res = scan(p.read_text(encoding="utf-8", errors="replace"))
     except OSError:

@@ -10,6 +10,15 @@ from .predefined import RUNTIME
 from .report_text import all_findings, status_of
 
 
+def _js_offsets(use: dict, text: str) -> dict:
+    """Python offsets count code points; JavaScript strings index UTF-16 code units."""
+
+    def utf16(i: int) -> int:
+        return len(text[:i].encode("utf-16-le")) // 2
+
+    return {**use, "start": utf16(use["start"]), "end": utf16(use["end"])}
+
+
 def to_data(pr: PipelineResult) -> dict:
     jobs = []
     for jr in pr.jobs:
@@ -40,7 +49,7 @@ def to_data(pr: PipelineResult) -> dict:
                     k: [x if isinstance(x, str) else repr(x) for x in j.script(k)]
                     for k in ("before_script", "script", "after_script")
                 },
-                "uses": [u.to_dict() for u in jr.uses],
+                "uses": [_js_offsets(u.to_dict(), j.script(u.section)[u.entry]) for u in jr.uses],
                 "needs": [
                     (n.get("job") or n.get("pipeline") or str(n)) if isinstance(n, dict) else str(n)
                     for n in (needs or [])

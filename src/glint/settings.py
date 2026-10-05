@@ -63,10 +63,11 @@ def load_settings(repo_root: Path, config_path: Optional[Path] = None) -> Settin
     s.required_vars_name = str(data.get("required_vars_name", s.required_vars_name))
     s.strict = bool(data.get("strict", False))
     for name, spec in (data.get("variables") or {}).items():
-        s.external_vars[str(name)] = _ext_from_mapping(str(name), spec, path.name)
+        for item in spec if isinstance(spec, list) else [spec]:  # a list = one entry per environment scope
+            s.add_external(_ext_from_mapping(str(name), item, path.name))
     for f in data.get("gitlab_variables_json") or []:
         for ev in load_gitlab_variables_json((path.parent / f).resolve()):
-            s.external_vars.setdefault(ev.name, ev)
+            s.add_external(ev)
     for proj, local in (data.get("project_includes") or {}).items():
         s.project_includes[str(proj)] = (path.parent / str(local)).resolve()
     return s

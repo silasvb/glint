@@ -30,12 +30,24 @@ class Settings:
     project_path: str = "group/project"
     protected_branches: list[str] = field(default_factory=list)  # empty = [default_branch]
     protected_tags: list[str] = field(default_factory=list)
-    external_vars: dict[str, ExternalVar] = field(default_factory=dict)
+    # name -> one entry per environment scope (GitLab allows the same key in several scopes)
+    external_vars: dict[str, list[ExternalVar]] = field(default_factory=dict)
     ignore: set[str] = field(default_factory=set)
     required_vars_name: str = "REQUIRED_VARS"
     strict: bool = False
     project_includes: dict[str, Path] = field(default_factory=dict)
     config_file: Optional[Path] = None
+
+    def __post_init__(self):
+        self.external_vars = {
+            k: list(v) if isinstance(v, (list, tuple)) else [v] for k, v in self.external_vars.items()
+        }
+
+    def add_external(self, ev: ExternalVar) -> None:
+        """Add a CI/CD variable; the first definition for a given name + scope wins."""
+        scopes = self.external_vars.setdefault(ev.name, [])
+        if not any(x.environment_scope == ev.environment_scope for x in scopes):
+            scopes.append(ev)
 
 
 @dataclass

@@ -76,7 +76,8 @@ class _Scanner:
         self.base = base
         self.expansions_only = expansions_only
         self.result = Scan()
-        self.statements: list[tuple[list[_Word], int]] = []
+        # (words, end offset, separator that ended it: "&&", "||", ";", "|", "&", "\n", ...)
+        self.statements: list[tuple[list[_Word], int, str]] = []
         self.pending_heredocs: list[tuple[str, bool, bool]] = []  # (delimiter, expands, strip_tabs)
 
     # -- helpers ---------------------------------------------------------
@@ -142,7 +143,9 @@ class _Scanner:
         def end_stmt(pos):
             end_word()
             if words:
-                self.statements.append((list(words), self.base + pos))
+                two = t[pos : pos + 2]
+                sep = two if two in ("&&", "||") else (t[pos] if pos < n else "\n")
+                self.statements.append((list(words), self.base + pos, sep))
                 words.clear()
 
         i = 0
@@ -358,7 +361,7 @@ class _Scanner:
     def _analyse_statements(self) -> None:
         r = self.result
         stmts = self.statements
-        for si, (words, end) in enumerate(stmts):
+        for si, (words, end, sep) in enumerate(stmts):
             texts = [_unquote(w.text) for w in words]
             k = 0
             while k < len(texts) and texts[k] in _LEADING_KEYWORDS:
@@ -416,18 +419,30 @@ class _Scanner:
                     r.set_u = True
 
             if cmd in ("[", "[[", "test"):
-                tested_names = set()
+                tested: dict[int, str] = {}  # use index -> "-n" / "-z"
                 for wi in range(k + 2, len(words)):
                     if texts[wi - 1] in ("-n", "-z"):
                         for ui in words[wi].uses:
                             r.uses[ui].tested = True
-                            tested_names.add(ui)
-                # `[ -z "$X" ] && exit 1` / `if [ -z "$X" ]; then ...; exit 1; fi`
-                if tested_names and any(
-                    _first_command(w) == "exit" for w, _ in stmts[si + 1 : si + 4]
-                ):
-                    for ui in tested_names:
-                        r.uses[ui].guard_test = True
+                            tested[ui] = texts[wi - 1]
+                if tested and _exits_soon(stmts[si + 1 : si + 4]):
+                    in_if = any(t in ("if", "elif") for t in texts[:k])
+                    for ui, op in tested.items():
+                        # A guard exits when the variable is *missing*:
+                        #   [ -z "$X" ] && exit 1  ·  [ -n "$X" ] || exit 1  ·  if [ -z "$X" ]; then exit 1; fi
+                        # whereas `[ -n "$SKIP" ] && exit 0` exits when it's present - not a guard.
+                        if (in_if or sep == "&&") and op == "-z" or sep == "||" and not in_if and op == "-n":
+                            r.uses[ui].guard_test = True
+
+
+def _exits_soon(following) -> bool:
+    """Is there an `exit` in the next few statements, before the if/else branch ends?"""
+    for words, _, _ in following:
+        if words and _unquote(words[0].text) in ("else", "elif", "fi"):
+            return False
+        if _first_command(words) == "exit":
+            return True
+    return False
 
 
 def _first_command(words: list[_Word]) -> str | None:

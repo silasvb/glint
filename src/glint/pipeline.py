@@ -113,6 +113,27 @@ def _external_available(ev: ExternalVar, sc: Scenario, s: Settings, env_name: Op
     return True, ""
 
 
+def _select_external(
+    candidates: list[ExternalVar], sc: Scenario, s: Settings, env_name: Optional[str]
+) -> tuple[Optional[ExternalVar], str]:
+    """Pick the CI/CD variable GitLab would use: the most specific matching environment scope."""
+    available, reasons = [], []
+    for ev in candidates:
+        ok, why = _external_available(ev, sc, s, env_name)
+        if ok:
+            available.append(ev)
+        else:
+            reasons.append(why)
+    if not available:
+        return None, "; ".join(dict.fromkeys(reasons))
+
+    def specificity(ev: ExternalVar) -> int:
+        scope = ev.environment_scope or "*"
+        return 0 if scope == "*" else 2 if scope == env_name else 1
+
+    return max(available, key=specificity), ""
+
+
 def _expand_value(value: str, lookup, depth: int = 0) -> str:
     if depth > 10:
         return value
@@ -139,9 +160,9 @@ class Simulator:
 
     def _ext_lookup_vars(self) -> dict[str, str]:
         out = {}
-        for name, ev in self.s.external_vars.items():
-            ok, _ = _external_available(ev, self.sc, self.s, None)
-            if ok and ev.environment_scope in ("*", "", None):
+        for name, candidates in self.s.external_vars.items():
+            ev, _ = _select_external(candidates, self.sc, self.s, None)
+            if ev is not None:
                 out[name] = ev.value if ev.value is not None else "<set>"
         return out
 
@@ -223,18 +244,26 @@ class Simulator:
         globals_ = self._inherited_globals(job, gvars)
         matrix = {k: VarDef(v) for k, v in job.matrix.items()}
 
-        pre_lookup = self._lookup([("p", self.base_vars), ("g", globals_), ("w", wf_vars), ("j", jvars), ("m", matrix)])
-        job_pre = predefined.job_variables(job.name, job.stage, job.config, lambda v: _expand_value(v, pre_lookup))
-        env_name = job_pre.get("CI_ENVIRONMENT_NAME")
+        unscoped = self._ext_lookup_vars()
 
-        externals, unavailable = {}, {}
-        for name, ev in s.external_vars.items():
-            ok, why = _external_available(ev, sc, s, env_name)
-            if ok:
-                externals[name] = ev
-            else:
-                unavailable[name] = why
+        def resolve_environment(rule_vars: dict[str, VarDef]):
+            """Job predefined vars (incl. CI_ENVIRONMENT_NAME) and the CI/CD variables that apply to it."""
+            env_lookup = self._lookup(
+                [("p", self.base_vars), ("g", globals_), ("w", wf_vars), ("j", jvars), ("m", matrix),
+                 ("r", rule_vars), ("c", unscoped), ("pv", sc.pipeline_vars)]
+            )
+            job_pre = predefined.job_variables(job.name, job.stage, job.config, lambda v: _expand_value(v, env_lookup))
+            env_name = job_pre.get("CI_ENVIRONMENT_NAME")
+            externals, unavailable = {}, {}
+            for name, candidates in s.external_vars.items():
+                ev, why = _select_external(candidates, sc, s, env_name)
+                if ev is not None:
+                    externals[name] = ev
+                else:
+                    unavailable[name] = why
+            return job_pre, externals, unavailable
 
+        job_pre, externals, unavailable = resolve_environment({})
         predef = {**self.base_vars, **job_pre}
         ext_values = {k: (v.value if v.value is not None else "<set>") for k, v in externals.items()}
         lookup = self._lookup(
@@ -249,6 +278,10 @@ class Simulator:
         else:
             outcome = self.ctx.eval_only_except(job.config, lookup)
         rvars = normalise_variables(outcome.variables)
+        if rvars:
+            # e.g. `environment: $TARGET_ENV` with TARGET_ENV set by rules:variables
+            job_pre, externals, unavailable = resolve_environment(rvars)
+            predef = {**self.base_vars, **job_pre}
 
         for name, why in predefined.CONDITIONAL.items():
             if name not in predef:
@@ -331,6 +364,8 @@ class Simulator:
             else:
                 my = stage_idx.get(r.job.stage, 0)
                 upstream = [o.name for o in results if o.included and stage_idx.get(o.job.stage, 0) < my]
+            # `needs: [build]` on a parallel:matrix job means every `build: [...]` instance
+            upstream = [o.name for up in upstream for o in results if up in (o.name, o.job.base_name)]
             for up in upstream:
                 if up in producers and up != r.name and by_name.get(up) and by_name[up].included:
                     names, complete = producers[up]

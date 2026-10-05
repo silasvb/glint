@@ -60,7 +60,7 @@ def _settings_and_scenario(args):
         s.strict = True
     for f in args.gitlab_vars:
         for ev in load_gitlab_variables_json(f):
-            s.external_vars.setdefault(ev.name, ev)
+            s.add_external(ev)
     for spec in args.project:
         proj, _, path = spec.partition("=")
         s.project_includes[proj] = Path(path).resolve()

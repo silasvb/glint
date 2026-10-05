@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import glob as globlib
 import itertools
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,7 @@ DEFAULT_KEYS = [
 LEGACY_GLOBAL_KEYS = ["image", "services", "cache", "before_script", "after_script"]
 SCRIPT_KEYS = ("before_script", "script", "after_script")
 DEFAULT_STAGES = ["build", "test", "deploy"]
+MAX_INCLUDES = 150  # GitLab's limit on included files per pipeline
 
 
 class Reference(list):
@@ -125,6 +127,8 @@ class ConfigLoader:
         self.findings: list[Finding] = []
         self.files: list[str] = []
         self.origins: dict[str, list[str]] = {}
+        self._stack: list[Path] = []  # files currently being loaded, for cycle detection
+        self._loaded: set[tuple[Path, str]] = set()  # (file, inputs) already merged
 
     # --- files & includes -------------------------------------------------
 
@@ -178,16 +182,33 @@ class ConfigLoader:
 
     def load_file(self, path: Path, root: Path, inputs: dict | None = None, depth: int = 0) -> dict:
         rel = self._rel(path)
+        key = path.resolve()
+        if key in self._stack:
+            chain = " → ".join(self._rel(p) for p in self._stack[self._stack.index(key) :] + [key])
+            self.findings.append(
+                Finding("warning", "include-cycle", f"circular include skipped (each file is loaded once): {chain}")
+            )
+            return {}
+        loaded_key = (key, json.dumps(inputs or {}, sort_keys=True, default=str))
+        if loaded_key in self._loaded:
+            return {}  # GitLab merges a file that's included more than once only once
+        if len(self._loaded) >= MAX_INCLUDES:
+            self.findings.append(
+                Finding("error", "include-limit", f"more than {MAX_INCLUDES} included files; {rel} not loaded")
+            )
+            return {}
+        self._loaded.add(loaded_key)
         self.files.append(rel)
         cfg = self._parse(path, inputs)
         includes = cfg.pop("include", None)
         merged: dict = {}
-        if depth > 100:
-            self.findings.append(Finding("error", "include-depth", f"include nesting too deep at {rel}"))
-            return cfg
-        for spec in includes if isinstance(includes, list) else ([includes] if includes else []):
-            for sub in self._resolve_include(spec, path, root, depth):
-                merged = deep_merge(merged, sub)
+        self._stack.append(key)
+        try:
+            for spec in includes if isinstance(includes, list) else ([includes] if includes else []):
+                for sub in self._resolve_include(spec, path, root, depth):
+                    merged = deep_merge(merged, sub)
+        finally:
+            self._stack.pop()
         for key, val in cfg.items():
             if key not in RESERVED and isinstance(val, dict):
                 self.origins.setdefault(key, [])

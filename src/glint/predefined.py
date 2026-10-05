@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import fnmatch
+
 from .model import Scenario, Settings, slugify
 
 RUNTIME = "<runtime>"
@@ -124,7 +126,7 @@ def pipeline_variables(sc: Scenario, s: Settings) -> dict[str, str]:
         }
     )
     if sc.kind == "mr":
-        ref = f"refs/merge-requests/1/head"
+        ref = "refs/merge-requests/1/head"
         v["CI_COMMIT_REF_NAME"] = sc.ref
         v["CI_COMMIT_REF_SLUG"] = slugify(sc.ref)
         for k in _MR_VARS:
@@ -140,7 +142,10 @@ def pipeline_variables(sc: Scenario, s: Settings) -> dict[str, str]:
                 "CI_MERGE_REQUEST_LABELS": "",
                 "CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED": "false",
                 "CI_MERGE_REQUEST_TARGET_BRANCH_PROTECTED": "true"
-                if (sc.target_branch or s.default_branch) in (s.protected_branches or [s.default_branch])
+                if any(
+                    fnmatch.fnmatchcase(sc.target_branch or s.default_branch, p)
+                    for p in (s.protected_branches or [s.default_branch])
+                )
                 else "false",
                 "CI_OPEN_MERGE_REQUESTS": f"{s.project_path}!1",
             }

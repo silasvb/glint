@@ -129,6 +129,9 @@ class RuleContext:
         paths = spec.get("paths") if isinstance(spec, dict) else spec
         paths = [_expand(str(p), lookup) for p in _as_list(paths)]
         sc = self.sc
+        if sc.kind == "tag":
+            details.append(f"changes: {paths}  →  always true for tag pipelines")
+            return True, False
         if sc.source not in ("push", "merge_request_event", "external_pull_request_event") or sc.new_branch:
             details.append(f"changes: {paths}  →  always true for {sc.source} pipelines")
             return True, False
@@ -254,18 +257,18 @@ class RuleContext:
     def eval_only_except(self, job: dict, lookup: Lookup) -> Outcome:
         only, exc = job.get("only"), job.get("except")
         details: list[str] = []
-        defaulted = only is None and exc is None
+        # GitLab defaults `only` to [branches, tags] whenever it's absent, even if `except` is set.
+        defaulted = only is None
         if defaulted:
             only = ["branches", "tags"]
-            details.append("no rules/only/except: defaults to only: [branches, tags]")
+            details.append("no only: defaults to only: [branches, tags]")
         when = str(job.get("when", "on_success"))
-        inc, unc = True, False
-        if only is not None:
-            inc, unc = self._only_clause(only, lookup, details, "only")
+        inc, unc = self._only_clause(only, lookup, details, "only")
+        excluded = False
         if inc and exc is not None:
-            ex, u2 = self._only_clause(exc, lookup, details, "except")
+            excluded, u2 = self._only_clause(exc, lookup, details, "except")
             unc = unc or u2
-            if ex:
+            if excluded:
                 inc = False
                 details.append("excluded by except")
         trace = [RuleTrace(1, {"only": only, "except": exc}, inc, details, unc)]
@@ -274,9 +277,13 @@ class RuleContext:
         return Outcome(
             included=inc,
             when=when if inc else "never",
-            reason=("no rules - default only: [branches, tags]" if defaulted else "only/except matched")
+            reason=("default only: [branches, tags]" if defaulted else "only/except matched")
             if inc
-            else ("not a branch/tag pipeline (default only: [branches, tags])" if defaulted else "excluded by only/except"),
+            else "excluded by except"
+            if excluded
+            else "not a branch/tag pipeline (default only: [branches, tags])"
+            if defaulted
+            else "excluded by only",
             matched_index=1 if inc else None,
             trace=trace,
             uncertain=unc,

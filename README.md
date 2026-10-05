@@ -54,6 +54,9 @@ variables:
   NPM_REGISTRY: https://npm.example.com
   DEPLOY_TOKEN: {protected: true, masked: true}     # only available on protected refs
   AWS_REGION: {environment_scope: production}       # only in jobs with that environment
+  DB_URL:                                           # same key in several scopes: most specific wins
+    - {environment_scope: production}
+    - {environment_scope: "review/*"}
 ignore: [SOME_VAR_SET_BY_THE_RUNNER_IMAGE]
 ```
 
