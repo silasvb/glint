@@ -1,0 +1,9 @@
+# Install the git hook once per clone:  uv run pre-commit install
+# Run against every file:               uv run pre-commit run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format

@@ -21,7 +21,11 @@ def names(script):
 
 def test_scan_plain_braced_and_modifiers():
     assert names('echo $A "${B}" ${C:-x} ${D:?msg} ${#E}') == [
-        ("A", None), ("B", None), ("C", ":-"), ("D", ":?"), ("E", "#")
+        ("A", None),
+        ("B", None),
+        ("C", ":-"),
+        ("D", ":?"),
+        ("E", "#"),
     ]
 
 
@@ -30,7 +34,12 @@ def test_scan_ignores_single_quotes_escapes_and_comments():
 
 
 def test_scan_nested_default_and_command_substitution():
-    assert names('x=$(cat "$F") ; echo ${A:-$B} `echo $C`') == [("F", None), ("A", ":-"), ("B", None), ("C", None)]
+    assert names('x=$(cat "$F") ; echo ${A:-$B} `echo $C`') == [
+        ("F", None),
+        ("A", ":-"),
+        ("B", None),
+        ("C", None),
+    ]
 
 
 def test_scan_heredocs():
@@ -41,8 +50,17 @@ def test_scan_heredocs():
 
 
 def test_scan_definitions():
-    s = scan("A=1\nexport B=2\nread -r C\nfor D in x y; do :; done\nFOO=1 make\nlocal E\neval \"F=1\"")
-    assert {d.name for d in s.defs} == {"A", "B", "C", "D", "E", "F"}  # FOO=1 make is a prefix, not a def
+    s = scan(
+        'A=1\nexport B=2\nread -r C\nfor D in x y; do :; done\nFOO=1 make\nlocal E\neval "F=1"'
+    )
+    assert {d.name for d in s.defs} == {
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+    }  # FOO=1 make is a prefix, not a def
 
 
 def test_scan_tests_and_guard_tests():
@@ -216,16 +234,26 @@ def test_unavailable_predefined_and_protected(tmp_path):
           script: [echo $CI_COMMIT_TAG $SECRET]
     """
     ext = {"SECRET": ExternalVar("SECRET", protected=True)}
-    pr = run(tmp_path, yml, Scenario("f", "branch", "feature", "push"), external_vars=ext)
+    pr = run(
+        tmp_path, yml, Scenario("f", "branch", "feature", "push"), external_vars=ext
+    )
     msgs = [f.message for f in pr.job("job").findings]
     assert any("CI_COMMIT_TAG" in m and "tag pipelines" in m for m in msgs)
     assert any("SECRET" in m and "protected" in m for m in msgs)
-    pr = run(tmp_path, yml, Scenario("t", "tag", "v1", "push"), external_vars=ext, protected_tags=["v*"])
+    pr = run(
+        tmp_path,
+        yml,
+        Scenario("t", "tag", "v1", "push"),
+        external_vars=ext,
+        protected_tags=["v*"],
+    )
     assert codes(pr, "job") == []
 
 
 def test_required_vars_pattern_and_strict(tmp_path):
-    template = (Path(__file__).parent.parent / "templates" / "require-vars.yml").read_text()
+    template = (
+        Path(__file__).parent.parent / "templates" / "require-vars.yml"
+    ).read_text()
     yml = """
         include: /require-vars.yml
         guarded:
@@ -236,7 +264,13 @@ def test_required_vars_pattern_and_strict(tmp_path):
           script: [deploy --token "$TOKEN"]
     """
     ext = {"TOKEN": ExternalVar("TOKEN")}
-    pr = run(tmp_path, yml, files={"require-vars.yml": template}, external_vars=ext, strict=True)
+    pr = run(
+        tmp_path,
+        yml,
+        files={"require-vars.yml": template},
+        external_vars=ext,
+        strict=True,
+    )
     assert codes(pr, "guarded") == []
     assert codes(pr, "unguarded") == ["unguarded"]
 
@@ -322,9 +356,19 @@ def test_example_pipeline_findings():
     from glint.settings import load_settings
 
     s = load_settings(EXAMPLES)
-    pr = analyse(Simulator(EXAMPLES / ".gitlab-ci.yml", s, Scenario("main", "branch", "main", "push")).run())
+    pr = analyse(
+        Simulator(
+            EXAMPLES / ".gitlab-ci.yml", s, Scenario("main", "branch", "main", "push")
+        ).run()
+    )
     c = codes(pr)
-    for expected in ("after-script-scope", "unavailable-var", "undefined-var", "rules-unknown-var", "blank-var"):
+    for expected in (
+        "after-script-scope",
+        "unavailable-var",
+        "undefined-var",
+        "rules-unknown-var",
+        "blank-var",
+    ):
         assert expected in c
 
 
@@ -354,7 +398,11 @@ def test_except_without_only_still_defaults_to_branches_and_tags(tmp_path):
     """
     mr = Scenario("mr", "mr", "feature", "merge_request_event", target_branch="main")
     assert not run(tmp_path, yml, mr).job("job").included
-    assert run(tmp_path, yml, Scenario("f", "branch", "feature", "push")).job("job").included
+    assert (
+        run(tmp_path, yml, Scenario("f", "branch", "feature", "push"))
+        .job("job")
+        .included
+    )
     assert not run(tmp_path, yml).job("job").outcome.included  # main is excluded
 
 
@@ -380,7 +428,9 @@ def test_environment_from_rules_variables_selects_scoped_cicd_vars(tmp_path):
             - if: $CI_COMMIT_BRANCH == "main"
               variables: {TARGET_ENV: production}
         """,
-        external_vars={"DB_URL": ExternalVar("DB_URL", "prod-db", environment_scope="production")},
+        external_vars={
+            "DB_URL": ExternalVar("DB_URL", "prod-db", environment_scope="production")
+        },
     )
     j = pr.job("deploy")
     assert j.variables["CI_ENVIRONMENT_NAME"].value == "production"
@@ -410,7 +460,9 @@ def test_same_cicd_var_in_several_environment_scopes(tmp_path):
     pr = run(tmp_path, yml, external_vars=ext)
     assert pr.job("staging").variables["URL"].value == "https://staging"
     assert pr.job("production").variables["URL"].value == "https://prod"
-    assert pr.job("review").variables["URL"].value == "https://default"  # most specific match wins
+    assert (
+        pr.job("review").variables["URL"].value == "https://default"
+    )  # most specific match wins
     assert codes(pr) == []
 
 
@@ -424,11 +476,18 @@ def test_glint_yml_and_export_merge_scopes(tmp_path):
         "gitlab_variables_json: [vars.json]\n"
     )
     (tmp_path / "vars.json").write_text(
-        json.dumps([{"key": "URL", "value": "x", "environment_scope": "staging"},
-                    {"key": "URL", "value": "y", "environment_scope": "production"}])
+        json.dumps(
+            [
+                {"key": "URL", "value": "x", "environment_scope": "staging"},
+                {"key": "URL", "value": "y", "environment_scope": "production"},
+            ]
+        )
     )
     s = load_settings(tmp_path)
-    assert sorted(v.environment_scope for v in s.external_vars["URL"]) == ["production", "staging"]
+    assert sorted(v.environment_scope for v in s.external_vars["URL"]) == [
+        "production",
+        "staging",
+    ]
 
 
 def test_sourced_dot_directory_file(tmp_path):
@@ -449,7 +508,9 @@ def test_sourced_file_outside_repo_is_not_read(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (tmp_path / "outside.sh").write_text("SECRET_DEF=1\n")
-    pr = run(repo, "job:\n  script:\n    - source ../outside.sh\n    - echo $SECRET_DEF\n")
+    pr = run(
+        repo, "job:\n  script:\n    - source ../outside.sh\n    - echo $SECRET_DEF\n"
+    )
     assert "possibly-undefined" in codes(pr, "job")
 
 
@@ -498,13 +559,19 @@ def test_mr_target_branch_protected_uses_wildcards(tmp_path):
 
     s = Settings(repo_root=tmp_path, protected_branches=["main", "release/*"])
     sc = Scenario("mr", "mr", "fix", "merge_request_event", target_branch="release/1.0")
-    assert pipeline_variables(sc, s)["CI_MERGE_REQUEST_TARGET_BRANCH_PROTECTED"] == "true"
+    assert (
+        pipeline_variables(sc, s)["CI_MERGE_REQUEST_TARGET_BRANCH_PROTECTED"] == "true"
+    )
 
 
 def test_html_offsets_are_utf16(tmp_path):
     from glint.report_html import to_data
 
-    pr = run(tmp_path, 'job:\n  script:\n    - echo "🚀 deploying $FOO"\n', external_vars={"FOO": ExternalVar("FOO")})
+    pr = run(
+        tmp_path,
+        'job:\n  script:\n    - echo "🚀 deploying $FOO"\n',
+        external_vars={"FOO": ExternalVar("FOO")},
+    )
     text = 'echo "🚀 deploying $FOO"'
     use = next(u for u in to_data(pr)["jobs"][0]["uses"] if u["name"] == "FOO")
     as_js = text.encode("utf-16-le")

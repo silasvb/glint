@@ -6,7 +6,6 @@ import fnmatch
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from . import predefined
 from .expr import referenced_variables
@@ -16,7 +15,17 @@ from .rules import Outcome, RuleContext
 from .shell import GITLAB_REF_RE
 
 # Variable sources, lowest precedence first.
-SOURCES = ["predefined", "global", "workflow", "job", "matrix", "rules", "dotenv", "cicd", "pipeline"]
+SOURCES = [
+    "predefined",
+    "global",
+    "workflow",
+    "job",
+    "matrix",
+    "rules",
+    "dotenv",
+    "cicd",
+    "pipeline",
+]
 SOURCE_LABELS = {
     "predefined": "predefined (GitLab)",
     "global": "global variables:",
@@ -34,12 +43,14 @@ YAML_SOURCES = {"global", "workflow", "job", "matrix", "rules"}
 @dataclass
 class VarEntry:
     name: str
-    value: Optional[str]  # None = present but value unknown (e.g. masked CI/CD variable)
+    value: str | None  # None = present but value unknown (e.g. masked CI/CD variable)
     source: str
     expand: bool = True
     detail: str = ""
-    overrides: list[tuple[str, Optional[str]]] = field(default_factory=list)  # (source, value) shadowed
-    expanded: Optional[str] = None
+    overrides: list[tuple[str, str | None]] = field(
+        default_factory=list
+    )  # (source, value) shadowed
+    expanded: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -50,7 +61,10 @@ class VarEntry:
             "source_label": SOURCE_LABELS.get(self.source, self.source),
             "detail": self.detail,
             "expand": self.expand,
-            "overrides": [{"source": s, "source_label": SOURCE_LABELS.get(s, s), "value": v} for s, v in self.overrides],
+            "overrides": [
+                {"source": s, "source_label": SOURCE_LABELS.get(s, s), "value": v}
+                for s, v in self.overrides
+            ],
         }
 
 
@@ -59,9 +73,13 @@ class JobResult:
     job: Job
     outcome: Outcome
     variables: dict[str, VarEntry] = field(default_factory=dict)
-    unavailable: dict[str, str] = field(default_factory=dict)  # name -> why it's not set
+    unavailable: dict[str, str] = field(
+        default_factory=dict
+    )  # name -> why it's not set
     dotenv: dict[str, str] = field(default_factory=dict)  # name -> producer job
-    dotenv_unknown: list[str] = field(default_factory=list)  # producers whose variable names we couldn't see
+    dotenv_unknown: list[str] = field(
+        default_factory=list
+    )  # producers whose variable names we couldn't see
     findings: list[Finding] = field(default_factory=list)
     uses: list = field(default_factory=list)  # analysis.VarUse
 
@@ -97,25 +115,36 @@ class PipelineResult:
     def runs(self) -> bool:
         return self.workflow.included
 
-    def job(self, name: str) -> Optional[JobResult]:
+    def job(self, name: str) -> JobResult | None:
         return next((j for j in self.jobs if j.name == name), None)
 
 
-def _external_available(ev: ExternalVar, sc: Scenario, s: Settings, env_name: Optional[str]) -> tuple[bool, str]:
+def _external_available(
+    ev: ExternalVar, sc: Scenario, s: Settings, env_name: str | None
+) -> tuple[bool, str]:
     if ev.protected and not sc.protected(s):
-        return False, f"protected CI/CD variable, but {sc.ref} is not a protected ref in this scenario"
+        return (
+            False,
+            f"protected CI/CD variable, but {sc.ref} is not a protected ref in this scenario",
+        )
     scope = ev.environment_scope or "*"
     if scope != "*":
         if not env_name:
-            return False, f"CI/CD variable scoped to environment '{scope}', but the job has no environment"
+            return (
+                False,
+                f"CI/CD variable scoped to environment '{scope}', but the job has no environment",
+            )
         if not fnmatch.fnmatchcase(env_name, scope):
-            return False, f"CI/CD variable scoped to environment '{scope}', job environment is '{env_name}'"
+            return (
+                False,
+                f"CI/CD variable scoped to environment '{scope}', job environment is '{env_name}'",
+            )
     return True, ""
 
 
 def _select_external(
-    candidates: list[ExternalVar], sc: Scenario, s: Settings, env_name: Optional[str]
-) -> tuple[Optional[ExternalVar], str]:
+    candidates: list[ExternalVar], sc: Scenario, s: Settings, env_name: str | None
+) -> tuple[ExternalVar | None, str]:
     """Pick the CI/CD variable GitLab would use: the most specific matching environment scope."""
     available, reasons = [], []
     for ev in candidates:
@@ -183,10 +212,17 @@ class Simulator:
         # --- workflow ---
         gvars = cfg.global_variables
         wf_lookup = self._lookup(
-            [("predefined", self.base_vars), ("global", gvars), ("cicd", self._ext_lookup_vars()), ("pipeline", sc.pipeline_vars)]
+            [
+                ("predefined", self.base_vars),
+                ("global", gvars),
+                ("cicd", self._ext_lookup_vars()),
+                ("pipeline", sc.pipeline_vars),
+            ]
         )
         if cfg.workflow.get("rules"):
-            wf = self.ctx.eval_rules(cfg.workflow["rules"], wf_lookup, default_when="always")
+            wf = self.ctx.eval_rules(
+                cfg.workflow["rules"], wf_lookup, default_when="always"
+            )
             for e in wf.errors:
                 findings.append(Finding("error", "rules-invalid", f"workflow: {e}"))
         else:
@@ -200,14 +236,27 @@ class Simulator:
 
         if not wf.included:
             for r in results:
-                r.outcome = Outcome(False, "never", "pipeline not created (workflow:rules)", trace=r.outcome.trace)
+                r.outcome = Outcome(
+                    False,
+                    "never",
+                    "pipeline not created (workflow:rules)",
+                    trace=r.outcome.trace,
+                )
 
         self._dotenv(results, cfg)
         self._validate(results, cfg, findings)
         if wf.included and not any(r.included for r in results):
-            findings.append(Finding("warning", "empty-pipeline", "no jobs run in this scenario, so GitLab won't create a pipeline"))
+            findings.append(
+                Finding(
+                    "warning",
+                    "empty-pipeline",
+                    "no jobs run in this scenario, so GitLab won't create a pipeline",
+                )
+            )
 
-        return PipelineResult(sc, self.s, cfg, wf, wf_vars, results, findings, sc.pipeline_vars)
+        return PipelineResult(
+            sc, self.s, cfg, wf, wf_vars, results, findings, sc.pipeline_vars
+        )
 
     # ------------------------------------------------------------------
 
@@ -220,7 +269,7 @@ class Simulator:
                 else:
                     merged[k] = (v, True)
 
-        def lookup(name: str) -> Optional[str]:
+        def lookup(name: str) -> str | None:
             if name not in merged:
                 return None
             value, expand = merged[name]
@@ -230,7 +279,9 @@ class Simulator:
 
         return lookup
 
-    def _inherited_globals(self, job: Job, gvars: dict[str, VarDef]) -> dict[str, VarDef]:
+    def _inherited_globals(
+        self, job: Job, gvars: dict[str, VarDef]
+    ) -> dict[str, VarDef]:
         inherit = (job.config.get("inherit") or {}).get("variables", True)
         if inherit is True:
             return gvars
@@ -249,10 +300,20 @@ class Simulator:
         def resolve_environment(rule_vars: dict[str, VarDef]):
             """Job predefined vars (incl. CI_ENVIRONMENT_NAME) and the CI/CD variables that apply to it."""
             env_lookup = self._lookup(
-                [("p", self.base_vars), ("g", globals_), ("w", wf_vars), ("j", jvars), ("m", matrix),
-                 ("r", rule_vars), ("c", unscoped), ("pv", sc.pipeline_vars)]
+                [
+                    ("p", self.base_vars),
+                    ("g", globals_),
+                    ("w", wf_vars),
+                    ("j", jvars),
+                    ("m", matrix),
+                    ("r", rule_vars),
+                    ("c", unscoped),
+                    ("pv", sc.pipeline_vars),
+                ]
             )
-            job_pre = predefined.job_variables(job.name, job.stage, job.config, lambda v: _expand_value(v, env_lookup))
+            job_pre = predefined.job_variables(
+                job.name, job.stage, job.config, lambda v: _expand_value(v, env_lookup)
+            )
             env_name = job_pre.get("CI_ENVIRONMENT_NAME")
             externals, unavailable = {}, {}
             for name, candidates in s.external_vars.items():
@@ -265,14 +326,28 @@ class Simulator:
 
         job_pre, externals, unavailable = resolve_environment({})
         predef = {**self.base_vars, **job_pre}
-        ext_values = {k: (v.value if v.value is not None else "<set>") for k, v in externals.items()}
+        ext_values = {
+            k: (v.value if v.value is not None else "<set>")
+            for k, v in externals.items()
+        }
         lookup = self._lookup(
-            [("predefined", predef), ("global", globals_), ("workflow", wf_vars), ("job", jvars), ("matrix", matrix),
-             ("cicd", ext_values), ("pipeline", sc.pipeline_vars)]
+            [
+                ("predefined", predef),
+                ("global", globals_),
+                ("workflow", wf_vars),
+                ("job", jvars),
+                ("matrix", matrix),
+                ("cicd", ext_values),
+                ("pipeline", sc.pipeline_vars),
+            ]
         )
 
         if "rules" in job.config:
-            outcome = self.ctx.eval_rules(job.config["rules"], lookup, default_when=str(job.config.get("when", "on_success")))
+            outcome = self.ctx.eval_rules(
+                job.config["rules"],
+                lookup,
+                default_when=str(job.config.get("when", "on_success")),
+            )
             for e in outcome.errors:
                 findings.append(Finding("error", "rules-invalid", e, job=job.name))
         else:
@@ -294,7 +369,10 @@ class Simulator:
             ("job", jvars),
             ("matrix", matrix),
             ("rules", rvars),
-            ("cicd", {k: VarDef(v.value, True, v.origin) for k, v in externals.items()}),
+            (
+                "cicd",
+                {k: VarDef(v.value, True, v.origin) for k, v in externals.items()},
+            ),
             ("pipeline", {k: VarDef(v) for k, v in sc.pipeline_vars.items()}),
         ]
         entries: dict[str, VarEntry] = {}
@@ -303,10 +381,19 @@ class Simulator:
                 ve = VarEntry(k, vd.value, source, vd.expand)
                 if source == "cicd":
                     ev = externals[k]
-                    flags = [f for f, on in (("protected", ev.protected), ("masked", ev.masked)) if on]
+                    flags = [
+                        f
+                        for f, on in (
+                            ("protected", ev.protected),
+                            ("masked", ev.masked),
+                        )
+                        if on
+                    ]
                     if ev.environment_scope not in ("*", None, ""):
                         flags.append(f"env: {ev.environment_scope}")
-                    ve.detail = f"{ev.origin}" + (f" ({', '.join(flags)})" if flags else "")
+                    ve.detail = f"{ev.origin}" + (
+                        f" ({', '.join(flags)})" if flags else ""
+                    )
                     if ev.masked and ev.value is not None:
                         ve.value = "[masked]"
                 if k in entries:
@@ -337,7 +424,9 @@ class Simulator:
         for r in results:
             if not r.included:
                 continue
-            reports = ((r.job.config.get("artifacts") or {}).get("reports") or {}).get("dotenv")
+            reports = ((r.job.config.get("artifacts") or {}).get("reports") or {}).get(
+                "dotenv"
+            )
             if not reports:
                 continue
             paths = reports if isinstance(reports, list) else [reports]
@@ -354,7 +443,11 @@ class Simulator:
                 upstream = []
                 for n in needs:
                     if isinstance(n, dict):
-                        if n.get("artifacts") is False or "pipeline" in n or "project" in n:
+                        if (
+                            n.get("artifacts") is False
+                            or "pipeline" in n
+                            or "project" in n
+                        ):
                             continue
                         upstream.append(str(n.get("job")))
                     else:
@@ -363,34 +456,70 @@ class Simulator:
                 upstream = [str(d) for d in r.job.config["dependencies"]]
             else:
                 my = stage_idx.get(r.job.stage, 0)
-                upstream = [o.name for o in results if o.included and stage_idx.get(o.job.stage, 0) < my]
+                upstream = [
+                    o.name
+                    for o in results
+                    if o.included and stage_idx.get(o.job.stage, 0) < my
+                ]
             # `needs: [build]` on a parallel:matrix job means every `build: [...]` instance
-            upstream = [o.name for up in upstream for o in results if up in (o.name, o.job.base_name)]
+            upstream = [
+                o.name
+                for up in upstream
+                for o in results
+                if up in (o.name, o.job.base_name)
+            ]
             for up in upstream:
-                if up in producers and up != r.name and by_name.get(up) and by_name[up].included:
+                if (
+                    up in producers
+                    and up != r.name
+                    and by_name.get(up)
+                    and by_name[up].included
+                ):
                     names, complete = producers[up]
                     for n in names:
                         r.dotenv.setdefault(n, up)
-                        if n not in r.variables or SOURCES.index(r.variables[n].source) < SOURCES.index("dotenv"):
+                        if n not in r.variables or SOURCES.index(
+                            r.variables[n].source
+                        ) < SOURCES.index("dotenv"):
                             prev = r.variables.get(n)
-                            ve = VarEntry(n, "<from artifact>", "dotenv", detail=f"from {up}")
+                            ve = VarEntry(
+                                n, "<from artifact>", "dotenv", detail=f"from {up}"
+                            )
                             if prev:
-                                ve.overrides = prev.overrides + [(prev.source, prev.value)]
+                                ve.overrides = prev.overrides + [
+                                    (prev.source, prev.value)
+                                ]
                             r.variables[n] = ve
                             r.unavailable.pop(n, None)
                     if not complete:
                         r.dotenv_unknown.append(up)
 
-    def _validate(self, results: list[JobResult], cfg: Config, findings: list[Finding]) -> None:
+    def _validate(
+        self, results: list[JobResult], cfg: Config, findings: list[Finding]
+    ) -> None:
         included = {r.name for r in results if r.included}
         defined = {r.name for r in results} | {r.job.base_name for r in results}
         stages = set(cfg.stages)
         for r in results:
             c = r.job.config
             if r.job.stage not in stages:
-                findings.append(Finding("error", "unknown-stage", f"job uses stage '{r.job.stage}', which isn't in stages:", job=r.name))
+                findings.append(
+                    Finding(
+                        "error",
+                        "unknown-stage",
+                        f"job uses stage '{r.job.stage}', which isn't in stages:",
+                        job=r.name,
+                    )
+                )
             if "script" not in c and "trigger" not in c and "run" not in c:
-                findings.append(Finding("error", "no-script", "job has no script: or trigger: (GitLab rejects this config)", job=r.name))
+                findings.append(
+                    Finding(
+                        "error",
+                        "no-script",
+                        "job has no script: or trigger: (GitLab rejects this config)",
+                        job=r.name,
+                    )
+                )
             for key in ("before_script", "script", "after_script"):
                 for i, entry in enumerate(r.job.script(key)):
                     if not isinstance(entry, str):
@@ -415,12 +544,28 @@ class Simulator:
                     optional = bool(n.get("optional"))
                     n = n.get("job")
                 n = str(n)
-                matches = {x.name for x in results if x.name == n or x.job.base_name == n}
+                matches = {
+                    x.name for x in results if x.name == n or x.job.base_name == n
+                }
                 if not matches & defined and n not in defined:
-                    findings.append(Finding("error", "needs-undefined", f"needs '{n}', which isn't defined anywhere", job=r.name))
+                    findings.append(
+                        Finding(
+                            "error",
+                            "needs-undefined",
+                            f"needs '{n}', which isn't defined anywhere",
+                            job=r.name,
+                        )
+                    )
                 elif not matches & included:
                     if optional:
-                        findings.append(Finding("info", "needs-optional-absent", f"optional need '{n}' isn't in this pipeline", job=r.name))
+                        findings.append(
+                            Finding(
+                                "info",
+                                "needs-optional-absent",
+                                f"optional need '{n}' isn't in this pipeline",
+                                job=r.name,
+                            )
+                        )
                     else:
                         findings.append(
                             Finding(
@@ -433,15 +578,27 @@ class Simulator:
                         )
             for d in c.get("dependencies") or []:
                 if str(d) not in included:
-                    findings.append(Finding("error", "dependency-excluded", f"dependencies lists '{d}', which isn't in this pipeline", job=r.name))
+                    findings.append(
+                        Finding(
+                            "error",
+                            "dependency-excluded",
+                            f"dependencies lists '{d}', which isn't in this pipeline",
+                            job=r.name,
+                        )
+                    )
 
         # Variables used in rules that nothing defines - usually a typo.
-        known = set(predefined.KNOWN) | set(self.s.external_vars) | set(self.sc.pipeline_vars) | set(self.s.ignore)
+        known = (
+            set(predefined.KNOWN)
+            | set(self.s.external_vars)
+            | set(self.sc.pipeline_vars)
+            | set(self.s.ignore)
+        )
         known |= set(cfg.global_variables)
         for r in results:
             known |= set(normalise_variables(r.job.config.get("variables")))
             known |= set(r.job.matrix)
-        exprs: list[tuple[Optional[str], str]] = []
+        exprs: list[tuple[str | None, str]] = []
         for rule in cfg.workflow.get("rules") or []:
             if isinstance(rule, dict) and "if" in rule:
                 exprs.append((None, str(rule["if"])))
@@ -473,7 +630,9 @@ class Simulator:
                     )
 
 
-_DOTENV_LINE = re.compile(r"""(?:echo|printf)\s+(?:-[a-z]+\s+)*["']?([A-Za-z_][A-Za-z0-9_]*)=""")
+_DOTENV_LINE = re.compile(
+    r"""(?:echo|printf)\s+(?:-[a-z]+\s+)*["']?([A-Za-z_][A-Za-z0-9_]*)="""
+)
 
 
 def _dotenv_names(job: Job, paths: list[str]) -> tuple[set[str], bool]:
@@ -493,7 +652,9 @@ def _dotenv_names(job: Job, paths: list[str]) -> tuple[set[str], bool]:
                 delim = heredoc.group(1)
                 i += 1
                 while i < len(lines) and lines[i].strip() != delim:
-                    m = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=", lines[i])
+                    m = re.match(
+                        r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=", lines[i]
+                    )
                     if m:
                         names.add(m.group(1))
                     i += 1

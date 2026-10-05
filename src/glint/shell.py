@@ -21,7 +21,19 @@ DEFAULTING = {":-", "-", ":=", "=", ":+", "+"}
 # ${X:?msg} aborts the script when X is unset (or blank, with the colon).
 GUARDING = {":?", "?"}
 
-_LEADING_KEYWORDS = {"!", "then", "do", "else", "elif", "if", "while", "until", "time", "{", "}"}
+_LEADING_KEYWORDS = {
+    "!",
+    "then",
+    "do",
+    "else",
+    "elif",
+    "if",
+    "while",
+    "until",
+    "time",
+    "{",
+    "}",
+}
 _DECLARERS = {"export", "declare", "typeset", "local", "readonly"}
 
 
@@ -30,9 +42,13 @@ class Use:
     name: str
     start: int
     end: int
-    modifier: str | None = None  # ":-", ":?", "#" (length), "!" (indirect), "op" (other), None (plain)
+    modifier: str | None = (
+        None  # ":-", ":?", "#" (length), "!" (indirect), "op" (other), None (plain)
+    )
     tested: bool = False  # operand of a [ -n ... ] / [ -z ... ] test
-    guard_test: bool = False  # ... and that test is followed by `exit` (a hand-written guard)
+    guard_test: bool = (
+        False  # ... and that test is followed by `exit` (a hand-written guard)
+    )
 
 
 @dataclass
@@ -46,8 +62,12 @@ class Def:
 class Scan:
     uses: list[Use] = field(default_factory=list)
     defs: list[Def] = field(default_factory=list)
-    sources: list[tuple[str, int]] = field(default_factory=list)  # (path, pos) of `source x` / `. x`
-    evals: list[int] = field(default_factory=list)  # positions of `eval` we couldn't see through
+    sources: list[tuple[str, int]] = field(
+        default_factory=list
+    )  # (path, pos) of `source x` / `. x`
+    evals: list[int] = field(
+        default_factory=list
+    )  # positions of `eval` we couldn't see through
     set_u: bool = False  # script enables `set -u` / `set -o nounset`
 
 
@@ -78,7 +98,9 @@ class _Scanner:
         self.result = Scan()
         # (words, end offset, separator that ended it: "&&", "||", ";", "|", "&", "\n", ...)
         self.statements: list[tuple[list[_Word], int, str]] = []
-        self.pending_heredocs: list[tuple[str, bool, bool]] = []  # (delimiter, expands, strip_tabs)
+        self.pending_heredocs: list[
+            tuple[str, bool, bool]
+        ] = []  # (delimiter, expands, strip_tabs)
 
     # -- helpers ---------------------------------------------------------
 
@@ -252,7 +274,9 @@ class _Scanner:
         nxt = t[i + 1] if i + 1 < n else ""
         if t.startswith("$((", i):
             close = self._find_close(i + 3, "(", ")", depth=2)
-            self._merge_uses(self._sub(t[i + 3 : close - 1], i + 3, expansions_only=True), cur)
+            self._merge_uses(
+                self._sub(t[i + 3 : close - 1], i + 3, expansions_only=True), cur
+            )
             self._append(cur, t[i : close + 1])
             return close + 1
         if nxt == "(":
@@ -307,7 +331,9 @@ class _Scanner:
                 mod, word, word_off = "op", rest, m.end()
         self._add_use(Use(name, abs_start, abs_end, mod), cur)
         if word:
-            self._merge_uses(self._sub(word, start + 2 + word_off, expansions_only=True), cur)
+            self._merge_uses(
+                self._sub(word, start + 2 + word_off, expansions_only=True), cur
+            )
         if mod in (":=", "="):
             self.result.defs.append(Def(name, abs_end, "default-assign"))
 
@@ -346,13 +372,21 @@ class _Scanner:
                 line = t[i:eol].rstrip("\r")
                 if (line.lstrip("\t") if strip_tabs else line) == delim:
                     if expands:
-                        self._merge_uses(self._sub(t[body_start:i], body_start, expansions_only=True), None)
+                        self._merge_uses(
+                            self._sub(
+                                t[body_start:i], body_start, expansions_only=True
+                            ),
+                            None,
+                        )
                     i = eol + 1
                     break
                 i = eol + 1
             else:
                 if expands:
-                    self._merge_uses(self._sub(t[body_start:n], body_start, expansions_only=True), None)
+                    self._merge_uses(
+                        self._sub(t[body_start:n], body_start, expansions_only=True),
+                        None,
+                    )
         self.pending_heredocs = []
         return min(i, n)
 
@@ -388,7 +422,11 @@ class _Scanner:
                         skip = False
                     elif a in ("-p", "-d", "-n", "-N", "-t", "-u"):
                         skip = True
-                    elif a.startswith("-") or a in ("<", "<<<") or not NAME_RE.fullmatch(a):
+                    elif (
+                        a.startswith("-")
+                        or a in ("<", "<<<")
+                        or not NAME_RE.fullmatch(a)
+                    ):
                         if a in ("<", "<<<"):
                             break
                     else:
@@ -412,11 +450,14 @@ class _Scanner:
                         found = True
                 if not found:
                     r.evals.append(end)
-            elif cmd == "set":
-                if any(a.startswith("-") and not a.startswith("--") and "u" in a for a in args) or (
-                    "nounset" in args
-                ):
-                    r.set_u = True
+            elif cmd == "set" and (
+                any(
+                    a.startswith("-") and not a.startswith("--") and "u" in a
+                    for a in args
+                )
+                or ("nounset" in args)
+            ):
+                r.set_u = True
 
             if cmd in ("[", "[[", "test"):
                 tested: dict[int, str] = {}  # use index -> "-n" / "-z"
@@ -431,7 +472,13 @@ class _Scanner:
                         # A guard exits when the variable is *missing*:
                         #   [ -z "$X" ] && exit 1  ·  [ -n "$X" ] || exit 1  ·  if [ -z "$X" ]; then exit 1; fi
                         # whereas `[ -n "$SKIP" ] && exit 0` exits when it's present - not a guard.
-                        if (in_if or sep == "&&") and op == "-z" or sep == "||" and not in_if and op == "-n":
+                        if (
+                            (in_if or sep == "&&")
+                            and op == "-z"
+                            or sep == "||"
+                            and not in_if
+                            and op == "-n"
+                        ):
                             r.uses[ui].guard_test = True
 
 
@@ -455,7 +502,9 @@ def _first_command(words: list[_Word]) -> str | None:
 
 # --- GitLab variable-value expansion (variables: FOO: "$BAR/x") ----------
 
-GITLAB_REF_RE = re.compile(r"\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|%([A-Za-z_][A-Za-z0-9_]*)%")
+GITLAB_REF_RE = re.compile(
+    r"\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|%([A-Za-z_][A-Za-z0-9_]*)%"
+)
 
 
 def gitlab_refs(value: str) -> list[str]:

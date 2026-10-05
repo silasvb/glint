@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Optional
 
 from .expr import ExprError, evaluate
 from .model import Scenario
 
-Lookup = Callable[[str], Optional[str]]
+Lookup = Callable[[str], str | None]
 
 
 @dataclass
@@ -38,7 +38,7 @@ class Outcome:
     included: bool
     when: str
     reason: str
-    matched_index: Optional[int] = None
+    matched_index: int | None = None
     variables: dict = field(default_factory=dict)
     allow_failure: object = None
     needs: object = None
@@ -54,8 +54,7 @@ class Outcome:
 def glob_regex(pattern: str) -> re.Pattern:
     """GitLab-style glob (FNM_PATHNAME | FNM_DOTMATCH | FNM_EXTGLOB) as a regex."""
     p = pattern.lstrip("/")
-    if p.startswith("./"):
-        p = p[2:]
+    p = p.removeprefix("./")
     out, i = "", 0
     while i < len(p):
         c = p[i]
@@ -73,7 +72,11 @@ def glob_regex(pattern: str) -> re.Pattern:
             i += 1
         elif c == "{" and "}" in p[i:]:
             j = p.index("}", i)
-            out += "(?:" + "|".join(glob_regex(a).pattern[1:-1] for a in p[i + 1 : j].split(",")) + ")"
+            out += (
+                "(?:"
+                + "|".join(glob_regex(a).pattern[1:-1] for a in p[i + 1 : j].split(","))
+                + ")"
+            )
             i = j + 1
         elif c == "[" and "]" in p[i + 1 :]:
             j = p.index("]", i + 1)
@@ -92,7 +95,11 @@ def glob_regex(pattern: str) -> re.Pattern:
 def _repo_files(root: str) -> tuple[str, ...]:
     files = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", ".venv", "__pycache__")]
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in (".git", "node_modules", ".venv", "__pycache__")
+        ]
         rel = os.path.relpath(dirpath, root)
         for f in filenames:
             files.append(f if rel == "." else f"{rel}/{f}".replace(os.sep, "/"))
@@ -124,7 +131,9 @@ class RuleContext:
         details.append(f"if: {expr}  →  {r.explanation}  →  {str(r.value).lower()}")
         return r.value
 
-    def eval_changes(self, spec, lookup: Lookup, details: list[str]) -> tuple[bool, bool]:
+    def eval_changes(
+        self, spec, lookup: Lookup, details: list[str]
+    ) -> tuple[bool, bool]:
         """Returns (result, uncertain)."""
         paths = spec.get("paths") if isinstance(spec, dict) else spec
         paths = [_expand(str(p), lookup) for p in _as_list(paths)]
@@ -132,12 +141,24 @@ class RuleContext:
         if sc.kind == "tag":
             details.append(f"changes: {paths}  →  always true for tag pipelines")
             return True, False
-        if sc.source not in ("push", "merge_request_event", "external_pull_request_event") or sc.new_branch:
-            details.append(f"changes: {paths}  →  always true for {sc.source} pipelines")
+        if (
+            sc.source
+            not in ("push", "merge_request_event", "external_pull_request_event")
+            or sc.new_branch
+        ):
+            details.append(
+                f"changes: {paths}  →  always true for {sc.source} pipelines"
+            )
             return True, False
         if sc.changed_files is not None:
-            hits = [f for f in sc.changed_files if any(glob_regex(p).match(f) for p in paths)]
-            details.append(f"changes: {paths}  →  {'matched ' + ', '.join(hits[:5]) if hits else 'no changed file matches'}")
+            hits = [
+                f
+                for f in sc.changed_files
+                if any(glob_regex(p).match(f) for p in paths)
+            ]
+            details.append(
+                f"changes: {paths}  →  {'matched ' + ', '.join(hits[:5]) if hits else 'no changed file matches'}"
+            )
             return bool(hits), False
         details.append(
             f"changes: {paths}  →  unknown which files changed; assuming {str(sc.assume_changes).lower()}"
@@ -145,18 +166,26 @@ class RuleContext:
         )
         return sc.assume_changes, True
 
-    def eval_exists(self, spec, lookup: Lookup, details: list[str]) -> tuple[bool, bool]:
+    def eval_exists(
+        self, spec, lookup: Lookup, details: list[str]
+    ) -> tuple[bool, bool]:
         if isinstance(spec, dict) and spec.get("project"):
-            details.append(f"exists: {spec} in another project  →  can't check; assuming true")
+            details.append(
+                f"exists: {spec} in another project  →  can't check; assuming true"
+            )
             return True, True
         paths = spec.get("paths") if isinstance(spec, dict) else spec
         paths = [_expand(str(p), lookup) for p in _as_list(paths)]
         files = _repo_files(str(self.repo_root))
         hits = [f for f in files if any(glob_regex(p).match(f) for p in paths)]
-        details.append(f"exists: {paths}  →  {'found ' + ', '.join(hits[:3]) if hits else 'no matching file'}")
+        details.append(
+            f"exists: {paths}  →  {'found ' + ', '.join(hits[:3]) if hits else 'no matching file'}"
+        )
         return bool(hits), False
 
-    def eval_rules(self, rules, lookup: Lookup, default_when: str = "on_success") -> Outcome:
+    def eval_rules(
+        self, rules, lookup: Lookup, default_when: str = "on_success"
+    ) -> Outcome:
         trace = []
         errors = []
         for idx, rule in enumerate(_as_list(rules)):
@@ -182,7 +211,8 @@ class RuleContext:
                 return Outcome(
                     included=when != "never",
                     when=when,
-                    reason=f"rule #{idx + 1} matched" + (" with when: never" if when == "never" else ""),
+                    reason=f"rule #{idx + 1} matched"
+                    + (" with when: never" if when == "never" else ""),
                     matched_index=idx + 1,
                     variables=rvars if isinstance(rvars, dict) else {},
                     allow_failure=rule.get("allow_failure"),
@@ -226,12 +256,16 @@ class RuleContext:
         if len(name) >= 2 and name.startswith("/") and name.rfind("/") > 0:
             try:
                 body, _, flags = name[1:].rpartition("/")
-                return re.search(body, sc.ref, re.I if "i" in flags else 0) is not None, ref
+                return re.search(
+                    body, sc.ref, re.IGNORECASE if "i" in flags else 0
+                ) is not None, ref
             except re.error:
                 return False, ref
         return name == sc.ref, ref
 
-    def _only_clause(self, spec, lookup: Lookup, details: list[str], label: str) -> tuple[bool, bool]:
+    def _only_clause(
+        self, spec, lookup: Lookup, details: list[str], label: str
+    ) -> tuple[bool, bool]:
         """Does an only/except spec match? Returns (matched, uncertain)."""
         if isinstance(spec, (list, str)):
             spec = {"refs": _as_list(spec)}
@@ -241,10 +275,14 @@ class RuleContext:
         if "refs" in spec:
             refs = [str(r) for r in _as_list(spec["refs"])]
             hits = [r for r in refs if self._ref_matches(r)[0]]
-            details.append(f"{label}:refs {refs}  →  {'matches ' + ', '.join(hits) if hits else 'no match'}")
+            details.append(
+                f"{label}:refs {refs}  →  {'matches ' + ', '.join(hits) if hits else 'no match'}"
+            )
             matched = bool(hits)
         if matched and "variables" in spec:
-            sub = [self.eval_if(e, lookup, details) for e in _as_list(spec["variables"])]
+            sub = [
+                self.eval_if(e, lookup, details) for e in _as_list(spec["variables"])
+            ]
             matched = any(sub)
         if matched and "changes" in spec:
             r, u = self.eval_changes(spec["changes"], lookup, details)
@@ -277,7 +315,9 @@ class RuleContext:
         return Outcome(
             included=inc,
             when=when if inc else "never",
-            reason=("default only: [branches, tags]" if defaulted else "only/except matched")
+            reason=(
+                "default only: [branches, tags]" if defaulted else "only/except matched"
+            )
             if inc
             else "excluded by except"
             if excluded
