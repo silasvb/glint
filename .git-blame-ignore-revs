@@ -1,0 +1,5 @@
+# Commits that only reformat code. Use with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Apply ruff format and lint fixes across the codebase
+bf78bcb1c4cced3b21c18cc9a9ad30b9647702ba

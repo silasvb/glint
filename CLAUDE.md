@@ -10,6 +10,8 @@ glint is a Python CLI distributed as a **uv tool** (`uv tool install .`). The pr
 uv sync                          # create/refresh .venv from uv.lock (includes the dev group)
 uv run pytest                    # run the test suite
 uv run pytest -k <name> -x       # run a subset, stop on first failure
+uv run pre-commit install        # once per clone: run the hooks on every commit
+uv run pre-commit run --all-files  # ruff lint (with fixes) + ruff format
 uv run glint show                # run the CLI from the working tree (no install needed)
 uv run glint check --all-scenarios
 uv build                         # build sdist + wheel into dist/
@@ -59,7 +61,8 @@ cd examples && uv run --project .. glint check --all-scenarios
 
 - Type hints on public functions; `from __future__ import annotations` where it helps on 3.10.
 - Match the existing style of the surrounding module — naming, docstring density, error handling.
-- Don't add a linter/formatter config or new tooling without asking; if one is added later, run it via `uv run` (e.g. `uv run ruff check`).
+- Linting and formatting use ruff's default rules and formatter, run through pre-commit (`.pre-commit-config.yaml`). Run `uv run pre-commit run --all-files` before finishing a change. Don't add per-file ignores or `# noqa` to silence a finding without a reason.
+- Don't add new linters, formatters or other tooling without asking.
 
 ## Safety
 
